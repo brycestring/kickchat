@@ -5,7 +5,8 @@ import { connectKickChat, renderKickMessageHTML, type KickChatMessage } from '@/
 
 type Msg = KickChatMessage & { _ts: number }
 
-const FONT_SIZES: Record<string, number> = { small: 14, medium: 18, large: 22, xlarge: 28 }
+// Sized for OBS Browser Source default of 800x600.
+const FONT_SIZES: Record<string, number> = { small: 20, medium: 26, large: 34, xlarge: 42 }
 const STROKE_WIDTHS: Record<string, number> = { off: 0, thin: 1, medium: 2, thick: 3, thicker: 4 }
 const SHADOWS: Record<string, string> = {
   off: 'none',
@@ -50,7 +51,7 @@ export default function OverlayPage() {
   const chatroomIdFromUrl = Number(q.cid) || 0
   const subBadges = useRef<SubBadge[]>(decodeSubBadges(q.sb))
 
-  const fontSize = FONT_SIZES[q.size || 'medium'] ?? 18
+  const fontSize = FONT_SIZES[q.size || 'medium'] ?? 26
   const strokeWidth = STROKE_WIDTHS[q.stroke || 'off'] ?? 0
   const textShadow = SHADOWS[q.shadow || 'off'] ?? 'none'
   const animate = q.animate !== '0'

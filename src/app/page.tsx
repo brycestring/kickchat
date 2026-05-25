@@ -32,7 +32,8 @@ const DEFAULTS: Settings = {
   delay: 10,
 }
 
-export const FONT_SIZES_PX: Record<Size, number> = { small: 14, medium: 18, large: 22, xlarge: 28 }
+// Sized for OBS Browser Source default of 800x600.
+export const FONT_SIZES_PX: Record<Size, number> = { small: 20, medium: 26, large: 34, xlarge: 42 }
 export const STROKE_PX: Record<Stroke, number> = { off: 0, thin: 1, medium: 2, thick: 3, thicker: 4 }
 export const SHADOW_CSS: Record<Shadow, string> = {
   off: 'none',
@@ -654,7 +655,7 @@ html, body { margin: 0; padding: 0; background: var(--bg-base); color: var(--tex
 /* ---- Preview ---- */
 .preview {
   position: relative;
-  height: 280px;
+  height: 340px;
   background:
     linear-gradient(135deg, rgba(83,252,24,0.04), transparent 50%),
     repeating-conic-gradient(#171717 0% 25%, #1d1d1d 0% 50%) 50% / 18px 18px;
