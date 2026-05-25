@@ -82,13 +82,25 @@ export default function SettingsPage() {
     setVerifyError(null)
     setGenerated(false)
     try {
-      const r = await fetch(`/api/kick/channel/${encodeURIComponent(u)}`)
-      const data = await r.json()
+      // Browser-side fetch — Kick blocks server IPs (Cloudflare) but
+      // allows CORS requests from browsers.
+      const r = await fetch(`https://kick.com/api/v2/channels/${encodeURIComponent(u)}`, {
+        headers: { 'Accept': 'application/json' },
+      })
       if (!r.ok) {
-        setVerifyError(data?.error || `Lookup failed (${r.status})`)
+        setVerifyError(r.status === 404 ? 'Channel not found' : `Kick API ${r.status}`)
         return
       }
-      setVerified({ display_name: data.display_name, avatar_url: data.avatar_url, is_live: !!data.is_live })
+      const data = await r.json()
+      if (!data?.chatroom?.id) {
+        setVerifyError('No chatroom found for channel')
+        return
+      }
+      setVerified({
+        display_name: data?.user?.username ?? u,
+        avatar_url: data?.user?.profile_pic ?? null,
+        is_live: !!data?.livestream,
+      })
       setGenerated(true)
     } catch (err) {
       setVerifyError(err instanceof Error ? err.message : 'Lookup failed')

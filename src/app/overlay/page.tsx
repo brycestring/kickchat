@@ -45,16 +45,23 @@ export default function OverlayPage() {
     async function start() {
       setStatus('looking-up')
       try {
-        const r = await fetch(`/api/kick/channel/${encodeURIComponent(channel)}`)
+        // Browser-side fetch — Kick blocks server IPs (Cloudflare).
+        const r = await fetch(`https://kick.com/api/v2/channels/${encodeURIComponent(channel)}`, {
+          headers: { 'Accept': 'application/json' },
+        })
+        if (!r.ok) {
+          if (!cancelled) { setStatus('error'); setError(r.status === 404 ? 'Channel not found' : `Kick API ${r.status}`) }
+          return
+        }
         const data = await r.json()
-        if (!r.ok || !data.chatroom_id) {
-          if (!cancelled) { setStatus('error'); setError(data?.error || 'Channel not found') }
+        if (!data?.chatroom?.id) {
+          if (!cancelled) { setStatus('error'); setError('No chatroom found') }
           return
         }
         if (cancelled) return
         setStatus('connecting')
         stop = connectKickChat(
-          data.chatroom_id,
+          data.chatroom.id,
           (m) => {
             const text = (m.content ?? '').trim()
             if (hideCommands && text.startsWith('!')) return
