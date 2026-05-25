@@ -4,11 +4,13 @@ import { useEffect, useMemo, useState } from 'react'
 
 type Size = 'small' | 'medium' | 'large' | 'xlarge'
 type Stroke = 'off' | 'thin' | 'medium' | 'thick' | 'thicker'
+type Shadow = 'off' | 'soft' | 'medium' | 'heavy'
 
 interface Settings {
   channel: string
   size: Size
   stroke: Stroke
+  shadow: Shadow
   animate: boolean
   badges: boolean
   commands: boolean   // hide commands
@@ -20,7 +22,8 @@ interface Settings {
 const DEFAULTS: Settings = {
   channel: '',
   size: 'medium',
-  stroke: 'medium',
+  stroke: 'off',
+  shadow: 'medium',
   animate: true,
   badges: true,
   commands: true,
@@ -29,11 +32,21 @@ const DEFAULTS: Settings = {
   delay: 10,
 }
 
+export const FONT_SIZES_PX: Record<Size, number> = { small: 14, medium: 18, large: 22, xlarge: 28 }
+export const STROKE_PX: Record<Stroke, number> = { off: 0, thin: 1, medium: 2, thick: 3, thicker: 4 }
+export const SHADOW_CSS: Record<Shadow, string> = {
+  off: 'none',
+  soft: '0 1px 3px rgba(0,0,0,0.6)',
+  medium: '0 2px 6px rgba(0,0,0,0.85), 0 0 2px rgba(0,0,0,0.6)',
+  heavy: '0 2px 4px rgba(0,0,0,1), 0 0 8px rgba(0,0,0,0.9), 0 0 14px rgba(0,0,0,0.7)',
+}
+
 function buildQuery(s: Settings): string {
   const p = new URLSearchParams()
   p.set('channel', s.channel.trim().toLowerCase())
   p.set('size', s.size)
   p.set('stroke', s.stroke)
+  p.set('shadow', s.shadow)
   p.set('animate', s.animate ? '1' : '0')
   p.set('badges', s.badges ? '1' : '0')
   p.set('commands', s.commands ? '1' : '0')
@@ -149,7 +162,7 @@ export default function SettingsPage() {
               />
             </div>
 
-            <div className="grid-2">
+            <div className="grid-3">
               <div>
                 <label className="section-label" htmlFor="size">Font Size</label>
                 <select id="size" className="select" value={s.size} onChange={e => set('size', e.target.value as Size)}>
@@ -167,6 +180,15 @@ export default function SettingsPage() {
                   <option value="medium">Medium</option>
                   <option value="thick">Thick</option>
                   <option value="thicker">Thicker</option>
+                </select>
+              </div>
+              <div>
+                <label className="section-label" htmlFor="shadow">Text Shadow</label>
+                <select id="shadow" className="select" value={s.shadow} onChange={e => set('shadow', e.target.value as Shadow)}>
+                  <option value="off">Off</option>
+                  <option value="soft">Soft</option>
+                  <option value="medium">Medium</option>
+                  <option value="heavy">Heavy</option>
                 </select>
               </div>
             </div>
@@ -224,17 +246,7 @@ export default function SettingsPage() {
             <span>Preview</span>
           </div>
           <div className="card-body">
-            <div className="preview">
-              {s.channel ? (
-                <iframe
-                  src={`/overlay?${buildQuery(s)}`}
-                  className="preview-frame"
-                  key={buildQuery(s)}
-                />
-              ) : (
-                <div className="preview-empty">Enter a Kick channel to preview</div>
-              )}
-            </div>
+            <SamplePreview s={s} />
           </div>
         </section>
       </main>
@@ -250,6 +262,73 @@ export default function SettingsPage() {
       </footer>
     </div>
   )
+}
+
+interface SampleMsg {
+  badges: { type: string; label: string }[]
+  username: string
+  color: string
+  text: string
+  emote?: { id: string; name: string }
+}
+
+const SAMPLES: SampleMsg[] = [
+  { badges: [{ type: 'broadcaster', label: 'host' }], username: 'streamer', color: '#53fc18', text: 'welcome to the stream 🎮' },
+  { badges: [{ type: 'moderator', label: 'mod' }], username: 'mod_alex', color: '#0e8c4a', text: 'rules in the description!' },
+  { badges: [{ type: 'subscriber', label: 'sub 12' }], username: 'CoolViewer42', color: '#1e90ff', text: 'this clip was insane' },
+  { badges: [{ type: 'vip', label: 'vip' }], username: 'KickFan', color: '#ff66c4', text: 'LETSGO', emote: { id: '37226', name: 'KEKW' } },
+  { badges: [], username: 'newchatter', color: '#ffa94d', text: 'first time here, looks fun' },
+]
+
+function SamplePreview({ s }: { s: Settings }) {
+  const fontSize = FONT_SIZES_PX[s.size]
+  const strokeWidth = STROKE_PX[s.stroke]
+  const shadow = SHADOW_CSS[s.shadow]
+
+  return (
+    <div className="preview">
+      <div
+        className="preview-chat"
+        style={{
+          fontSize: `${fontSize}px`,
+          WebkitTextStroke: strokeWidth ? `${strokeWidth}px #000` : undefined,
+          textShadow: shadow,
+        }}
+      >
+        {SAMPLES.map((m, i) => (
+          <div key={i} className={`sample-msg ${s.animate ? 'anim' : ''}`} style={{ animationDelay: `${i * 0.08}s` }}>
+            {s.badges && m.badges.map((b, j) => (
+              <span key={j} className="sample-badge" style={{ background: badgeBg(b.type) }}>{b.label}</span>
+            ))}
+            <span className="sample-name" style={{ color: m.color }}>{m.username}</span>
+            <span className="sample-colon">: </span>
+            <span className="sample-text">
+              {m.text}
+              {m.emote && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  className="sample-emote"
+                  src={`https://files.kick.com/emotes/${m.emote.id}/fullsize`}
+                  alt={m.emote.name}
+                  onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
+                />
+              )}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function badgeBg(type: string): string {
+  switch (type) {
+    case 'broadcaster': return '#e0245e'
+    case 'moderator':   return '#0e8c4a'
+    case 'vip':         return '#a020f0'
+    case 'subscriber':  return '#5865f2'
+    default:            return '#555'
+  }
 }
 
 function Check({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
@@ -387,6 +466,8 @@ html, body { margin: 0; padding: 0; background: var(--bg-base); color: var(--tex
 }
 
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
+@media (max-width: 520px) { .grid-3 { grid-template-columns: 1fr 1fr; } }
 .toggles { gap: 12px 16px; }
 .fade-row { display: flex; align-items: center; gap: 16px; }
 
@@ -480,14 +561,36 @@ html, body { margin: 0; padding: 0; background: var(--bg-base); color: var(--tex
 /* ---- Preview ---- */
 .preview {
   position: relative;
-  height: 360px;
-  background: repeating-conic-gradient(#161616 0% 25%, #1c1c1c 0% 50%) 50% / 18px 18px;
+  min-height: 240px;
+  background:
+    linear-gradient(135deg, rgba(83,252,24,0.04), transparent 50%),
+    repeating-conic-gradient(#171717 0% 25%, #1d1d1d 0% 50%) 50% / 18px 18px;
   border: 1px solid var(--border-dim);
   border-radius: var(--radius);
   overflow: hidden;
+  padding: 14px 16px;
 }
-.preview-frame { width: 100%; height: 100%; border: 0; background: transparent; }
-.preview-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--text-muted); font-size: 13px; letter-spacing: 0.05em; text-transform: uppercase; }
+.preview-chat {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+  color: #ffffff;
+  line-height: 1.4;
+}
+.sample-msg { padding: 4px 0; }
+.sample-msg.anim { animation: sampleIn .4s ease-out both; }
+@keyframes sampleIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.sample-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 0 5px; height: 1.1em; line-height: 1.1em;
+  font-size: 0.62em; font-weight: 800;
+  border-radius: 4px; margin-right: 4px;
+  vertical-align: middle; text-transform: uppercase; letter-spacing: 0.04em;
+  color: #fff;
+  -webkit-text-stroke: 0;
+  text-shadow: none;
+}
+.sample-name { font-weight: 800; }
+.sample-colon { opacity: 0.65; margin: 0 2px; }
+.sample-emote { display: inline-block; height: 1.6em; vertical-align: middle; margin: -2px 2px; -webkit-text-stroke: 0; }
 
 /* ---- Footer ---- */
 .footer {

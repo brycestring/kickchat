@@ -7,6 +7,12 @@ type Msg = KickChatMessage & { _ts: number }
 
 const FONT_SIZES: Record<string, number> = { small: 14, medium: 18, large: 22, xlarge: 28 }
 const STROKE_WIDTHS: Record<string, number> = { off: 0, thin: 1, medium: 2, thick: 3, thicker: 4 }
+const SHADOWS: Record<string, string> = {
+  off: 'none',
+  soft: '0 1px 3px rgba(0,0,0,0.6)',
+  medium: '0 2px 6px rgba(0,0,0,0.85), 0 0 2px rgba(0,0,0,0.6)',
+  heavy: '0 2px 4px rgba(0,0,0,1), 0 0 8px rgba(0,0,0,0.9), 0 0 14px rgba(0,0,0,0.7)',
+}
 const BOT_USERS = new Set(
   ['nightbot', 'botisimo', 'streamelements', 'streamlabs', 'wizebot', 'fossabot', 'kickbot'].map(s => s.toLowerCase())
 )
@@ -26,6 +32,7 @@ export default function OverlayPage() {
   const channel = q.channel?.toLowerCase() || ''
   const fontSize = FONT_SIZES[q.size || 'medium'] ?? 18
   const strokeWidth = STROKE_WIDTHS[q.stroke || 'off'] ?? 0
+  const textShadow = SHADOWS[q.shadow || 'off'] ?? 'none'
   const animate = q.animate !== '0'
   const showBadges = q.badges !== '0'
   const hideCommands = q.commands === '1' || q.commands === 'hide'
@@ -120,6 +127,7 @@ export default function OverlayPage() {
         lineHeight: 1.35,
         wordWrap: 'break-word',
         WebkitTextStroke: strokeWidth ? `${strokeWidth}px #000` : undefined,
+        textShadow,
         scrollbarWidth: 'none',
       }}
     >
@@ -129,7 +137,8 @@ export default function OverlayPage() {
         @keyframes kcIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
         .kc-name { font-weight: 800; }
         .kc-emote { display: inline-block; height: 1.6em; vertical-align: middle; margin: -2px 1px; }
-        .kc-badge { display: inline-flex; align-items: center; justify-content: center; padding: 0 5px; height: 1.1em; line-height: 1.1em; font-size: 0.65em; font-weight: 800; border-radius: 4px; margin-right: 4px; vertical-align: middle; text-transform: uppercase; letter-spacing: 0.04em; -webkit-text-stroke: 0; }
+        .kc-badge { display: inline-flex; align-items: center; justify-content: center; padding: 0 5px; height: 1.1em; line-height: 1.1em; font-size: 0.65em; font-weight: 800; border-radius: 4px; margin-right: 4px; vertical-align: middle; text-transform: uppercase; letter-spacing: 0.04em; -webkit-text-stroke: 0; text-shadow: none; }
+        .kc-emote { -webkit-text-stroke: 0; }
         ::-webkit-scrollbar { display: none; }
       `}</style>
 
