@@ -1,67 +1,57 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
-type Anim = 'slide' | 'fade' | 'none'
-type Bg = 'transparent' | 'dark' | 'light' | 'custom'
-type FontKey = 'system' | 'inter' | 'mono' | 'rounded' | 'display'
+type Size = 'small' | 'medium' | 'large' | 'xlarge'
+type Stroke = 'off' | 'thin' | 'medium' | 'thick' | 'thicker'
 
 interface Settings {
   channel: string
-  font: FontKey
-  size: number
-  color: string
-  bg: Bg
-  bgcolor: string
+  size: Size
+  stroke: Stroke
+  animate: boolean
   badges: boolean
-  timestamps: boolean
-  stroke: boolean
-  anim: Anim
-  max: number
+  commands: boolean   // hide commands
+  bots: boolean       // hide bots
+  fade: boolean
+  delay: number
 }
 
 const DEFAULTS: Settings = {
   channel: '',
-  font: 'system',
-  size: 18,
-  color: '#ffffff',
-  bg: 'transparent',
-  bgcolor: '#000000',
+  size: 'medium',
+  stroke: 'medium',
+  animate: true,
   badges: true,
-  timestamps: false,
-  stroke: true,
-  anim: 'slide',
-  max: 40,
+  commands: true,
+  bots: true,
+  fade: false,
+  delay: 10,
 }
 
 function buildQuery(s: Settings): string {
   const p = new URLSearchParams()
   p.set('channel', s.channel.trim().toLowerCase())
-  p.set('font', s.font)
-  p.set('size', String(s.size))
-  p.set('color', s.color)
-  p.set('bg', s.bg)
-  if (s.bg === 'custom') p.set('bgcolor', s.bgcolor)
+  p.set('size', s.size)
+  p.set('stroke', s.stroke)
+  p.set('animate', s.animate ? '1' : '0')
   p.set('badges', s.badges ? '1' : '0')
-  p.set('timestamps', s.timestamps ? '1' : '0')
-  p.set('stroke', s.stroke ? '1' : '0')
-  p.set('anim', s.anim)
-  p.set('max', String(s.max))
+  p.set('commands', s.commands ? '1' : '0')
+  p.set('bots', s.bots ? '1' : '0')
+  if (s.fade) {
+    p.set('fade', '1')
+    p.set('delay', String(s.delay))
+  }
   return p.toString()
 }
 
 export default function SettingsPage() {
   const [s, setS] = useState<Settings>(DEFAULTS)
   const [origin, setOrigin] = useState('')
-  const [verifying, setVerifying] = useState(false)
-  const [verified, setVerified] = useState<null | {
-    display_name: string
-    avatar_url: string | null
-    is_live: boolean
-  }>(null)
+  const [verified, setVerified] = useState<null | { display_name: string; avatar_url: string | null; is_live: boolean }>(null)
   const [verifyError, setVerifyError] = useState<string | null>(null)
+  const [generated, setGenerated] = useState(false)
   const [copied, setCopied] = useState(false)
-  const previewRef = useRef<HTMLIFrameElement>(null)
 
   useEffect(() => {
     setOrigin(window.location.origin)
@@ -80,28 +70,28 @@ export default function SettingsPage() {
     return `${origin}/overlay?${buildQuery(s)}`
   }, [origin, s])
 
-  async function verify() {
+  function set<K extends keyof Settings>(key: K, val: Settings[K]) {
+    setS(prev => ({ ...prev, [key]: val }))
+  }
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault()
     const u = s.channel.trim().toLowerCase()
     if (!u) return
-    setVerifying(true)
-    setVerifyError(null)
     setVerified(null)
+    setVerifyError(null)
+    setGenerated(false)
     try {
       const r = await fetch(`/api/kick/channel/${encodeURIComponent(u)}`)
       const data = await r.json()
       if (!r.ok) {
         setVerifyError(data?.error || `Lookup failed (${r.status})`)
-      } else {
-        setVerified({
-          display_name: data.display_name,
-          avatar_url: data.avatar_url,
-          is_live: !!data.is_live,
-        })
+        return
       }
+      setVerified({ display_name: data.display_name, avatar_url: data.avatar_url, is_live: !!data.is_live })
+      setGenerated(true)
     } catch (err) {
       setVerifyError(err instanceof Error ? err.message : 'Lookup failed')
-    } finally {
-      setVerifying(false)
     }
   }
 
@@ -114,265 +104,392 @@ export default function SettingsPage() {
     } catch {}
   }
 
-  function set<K extends keyof Settings>(key: K, val: Settings[K]) {
-    setS(prev => ({ ...prev, [key]: val }))
-  }
-
   return (
-    <div style={{ minHeight: '100vh', padding: '32px 20px', maxWidth: 1100, margin: '0 auto' }}>
-      <header style={{ marginBottom: 28 }}>
-        <h1 style={{ margin: 0, fontSize: 28, fontWeight: 800, letterSpacing: '-0.02em' }}>
-          Kick Chat Overlay
-        </h1>
-        <p style={{ margin: '6px 0 0', opacity: 0.65, fontSize: 14 }}>
-          A free, customizable Kick chat for OBS. Paste the URL as a Browser Source.
-        </p>
+    <div className="page">
+      <style>{styles}</style>
+
+      <header className="hero">
+        <div className="hero-inner">
+          <KickLogo />
+          <h1 className="title glow-text">Chat Overlay</h1>
+        </div>
       </header>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
-        {/* ----------- Settings ----------- */}
-        <section style={card}>
-          <Field label="Kick username">
-            <div style={{ display: 'flex', gap: 8 }}>
+      <main className="main">
+        {/* ---- Configuration card ---- */}
+        <section className="card">
+          <div className="card-header">
+            <div className="dots"><i/><i/><i/></div>
+            <span>Configuration</span>
+          </div>
+
+          <form className="card-body" onSubmit={onSubmit}>
+            <div>
+              <label className="section-label" htmlFor="channel">Kick Channel</label>
               <input
+                id="channel"
+                className="input center"
+                placeholder="kick channel name"
                 value={s.channel}
                 onChange={e => set('channel', e.target.value)}
-                placeholder="trainwreckstv"
-                style={input}
-                onKeyDown={e => { if (e.key === 'Enter') verify() }}
+                autoComplete="off"
+                spellCheck={false}
               />
-              <button onClick={verify} disabled={verifying || !s.channel.trim()} style={btnSecondary}>
-                {verifying ? '…' : 'Verify'}
-              </button>
             </div>
-            {verifyError && <small style={{ color: '#ff6b6b', marginTop: 6, display: 'block' }}>{verifyError}</small>}
-            {verified && (
-              <small style={{ color: '#4ade80', marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
-                {verified.avatar_url && (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={verified.avatar_url} alt="" width={20} height={20} style={{ borderRadius: '50%' }} />
-                )}
-                Found {verified.display_name}{verified.is_live ? ' (live now)' : ''}
-              </small>
-            )}
-          </Field>
 
-          <div style={row2}>
-            <Field label="Font">
-              <select value={s.font} onChange={e => set('font', e.target.value as FontKey)} style={input}>
-                <option value="system">System</option>
-                <option value="inter">Inter (sans)</option>
-                <option value="rounded">Rounded</option>
-                <option value="mono">Monospace</option>
-                <option value="display">Display (Bebas)</option>
-              </select>
-            </Field>
-            <Field label={`Font size: ${s.size}px`}>
-              <input type="range" min={10} max={48} value={s.size}
-                onChange={e => set('size', Number(e.target.value))} style={{ width: '100%' }} />
-            </Field>
-          </div>
-
-          <div style={row2}>
-            <Field label="Text color">
-              <div style={{ display: 'flex', gap: 8 }}>
-                <input type="color" value={s.color}
-                  onChange={e => set('color', e.target.value)}
-                  style={{ ...input, width: 50, padding: 2, height: 38 }} />
-                <input value={s.color} onChange={e => set('color', e.target.value)} style={{ ...input, flex: 1 }} />
+            <div className="grid-2">
+              <div>
+                <label className="section-label" htmlFor="size">Font Size</label>
+                <select id="size" className="select" value={s.size} onChange={e => set('size', e.target.value as Size)}>
+                  <option value="small">Small</option>
+                  <option value="medium">Medium</option>
+                  <option value="large">Large</option>
+                  <option value="xlarge">X-Large</option>
+                </select>
               </div>
-            </Field>
-            <Field label="Background">
-              <select value={s.bg} onChange={e => set('bg', e.target.value as Bg)} style={input}>
-                <option value="transparent">Transparent (OBS)</option>
-                <option value="dark">Dark (preview)</option>
-                <option value="light">Light (preview)</option>
-                <option value="custom">Custom color</option>
-              </select>
-            </Field>
-          </div>
-
-          {s.bg === 'custom' && (
-            <Field label="Custom background">
-              <div style={{ display: 'flex', gap: 8 }}>
-                <input type="color" value={s.bgcolor}
-                  onChange={e => set('bgcolor', e.target.value)}
-                  style={{ ...input, width: 50, padding: 2, height: 38 }} />
-                <input value={s.bgcolor} onChange={e => set('bgcolor', e.target.value)} style={{ ...input, flex: 1 }} />
+              <div>
+                <label className="section-label" htmlFor="stroke">Text Stroke</label>
+                <select id="stroke" className="select" value={s.stroke} onChange={e => set('stroke', e.target.value as Stroke)}>
+                  <option value="off">Off</option>
+                  <option value="thin">Thin</option>
+                  <option value="medium">Medium</option>
+                  <option value="thick">Thick</option>
+                  <option value="thicker">Thicker</option>
+                </select>
               </div>
-            </Field>
-          )}
+            </div>
 
-          <div style={row2}>
-            <Field label="Animation">
-              <select value={s.anim} onChange={e => set('anim', e.target.value as Anim)} style={input}>
-                <option value="slide">Slide in</option>
-                <option value="fade">Fade in</option>
-                <option value="none">None</option>
-              </select>
-            </Field>
-            <Field label={`Max messages: ${s.max}`}>
-              <input type="range" min={5} max={200} step={5} value={s.max}
-                onChange={e => set('max', Number(e.target.value))} style={{ width: '100%' }} />
-            </Field>
-          </div>
+            <div className="grid-2 toggles">
+              <Check label="Animate" checked={s.animate} onChange={v => set('animate', v)} />
+              <Check label="Badges" checked={s.badges} onChange={v => set('badges', v)} />
+              <Check label="Hide Commands" checked={s.commands} onChange={v => set('commands', v)} />
+              <Check label="Hide Bots" checked={s.bots} onChange={v => set('bots', v)} />
+            </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginTop: 12 }}>
-            <Toggle label="Badges" checked={s.badges} onChange={v => set('badges', v)} />
-            <Toggle label="Timestamps" checked={s.timestamps} onChange={v => set('timestamps', v)} />
-            <Toggle label="Outline" checked={s.stroke} onChange={v => set('stroke', v)} />
-          </div>
-
-          <div style={{ marginTop: 20, paddingTop: 18, borderTop: '1px solid #1f1f24' }}>
-            <Field label="Overlay URL (paste into OBS Browser Source)">
-              <div style={{ display: 'flex', gap: 8 }}>
-                <input
-                  readOnly
-                  value={overlayUrl || 'Enter a channel above…'}
-                  style={{ ...input, fontSize: 12, fontFamily: 'ui-monospace, Menlo, monospace' }}
-                  onFocus={e => e.currentTarget.select()}
-                />
-                <button onClick={copyUrl} disabled={!overlayUrl} style={btnPrimary}>
-                  {copied ? 'Copied ✓' : 'Copy'}
-                </button>
-              </div>
-              {overlayUrl && (
-                <small style={{ opacity: 0.55, marginTop: 6, display: 'block', fontSize: 12 }}>
-                  In OBS → + → Browser → paste URL → width 400, height 600 (or your preference).
-                </small>
-              )}
-            </Field>
-          </div>
-        </section>
-
-        {/* ----------- Live preview ----------- */}
-        <section style={{ ...card, padding: 0, overflow: 'hidden', position: 'relative' }}>
-          <div style={{
-            padding: '12px 16px',
-            borderBottom: '1px solid #1f1f24',
-            fontSize: 13,
-            opacity: 0.7,
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-          }}>
-            <span>Live preview</span>
-            <span style={{ fontSize: 11, opacity: 0.5 }}>
-              {s.channel ? `#${s.channel.toLowerCase()}` : 'no channel'}
-            </span>
-          </div>
-          <div style={{
-            position: 'relative',
-            height: 540,
-            background:
-              s.bg === 'transparent'
-                ? 'repeating-conic-gradient(#1a1a1f 0% 25%, #131316 0% 50%) 50% / 20px 20px'
-                : '#0d0d10',
-          }}>
-            {s.channel ? (
-              <iframe
-                ref={previewRef}
-                src={`/overlay?${buildQuery(s)}`}
-                style={{ width: '100%', height: '100%', border: 0, background: 'transparent' }}
-                key={buildQuery(s)} /* remount on change */
+            <div className="fade-row">
+              <Check label="Fade Messages" checked={s.fade} onChange={v => set('fade', v)} />
+              <input
+                type="number"
+                min={2}
+                max={120}
+                className="input small"
+                value={s.delay}
+                disabled={!s.fade}
+                onChange={e => set('delay', Math.max(2, Math.min(120, Number(e.target.value) || 10)))}
+                placeholder="seconds"
               />
-            ) : (
-              <div style={{
-                position: 'absolute', inset: 0, display: 'flex',
-                alignItems: 'center', justifyContent: 'center', opacity: 0.45, fontSize: 14,
-              }}>
-                Enter a Kick username to start the preview.
+            </div>
+
+            {verifyError && <div className="error">⚠ {verifyError}</div>}
+            {verified && generated && (
+              <div className="success">
+                {verified.avatar_url && <img src={verified.avatar_url} alt="" />}
+                Found <b>{verified.display_name}</b>{verified.is_live ? ' — live now' : ''}
               </div>
             )}
+
+            <button type="submit" className="btn-generate" disabled={!s.channel.trim()}>
+              Generate URL
+            </button>
+          </form>
+
+          {generated && overlayUrl && (
+            <div className="url-output">
+              <p className="section-label center">
+                {copied ? 'Copied to clipboard ✓' : 'Click to copy Browser Source URL'}
+              </p>
+              <div className="url-box" onClick={copyUrl} title="Click to copy">
+                {overlayUrl}
+              </div>
+            </div>
+          )}
+        </section>
+
+        {/* ---- Preview card ---- */}
+        <section className="card">
+          <div className="card-header">
+            <div className="dots"><i/><i/><i/></div>
+            <span>Preview</span>
+          </div>
+          <div className="card-body">
+            <div className="preview">
+              {s.channel ? (
+                <iframe
+                  src={`/overlay?${buildQuery(s)}`}
+                  className="preview-frame"
+                  key={buildQuery(s)}
+                />
+              ) : (
+                <div className="preview-empty">Enter a Kick channel to preview</div>
+              )}
+            </div>
           </div>
         </section>
-      </div>
+      </main>
 
-      <footer style={{ marginTop: 32, opacity: 0.4, fontSize: 12, textAlign: 'center' }}>
-        Not affiliated with Kick. Built for streamers who want a clean OBS chat.
+      <footer className="footer">
+        <p className="footer-credit">
+          <span className="muted">Made for</span>
+          <span className="footer-link"> Kick streamers</span>
+        </p>
+        <p className="footer-disclaimer">
+          Not affiliated with <a href="https://kick.com" target="_blank" rel="noreferrer noopener">Kick.com</a>
+        </p>
       </footer>
     </div>
   )
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Check({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
   return (
-    <label style={{ display: 'block', marginBottom: 14 }}>
-      <div style={{ fontSize: 12, fontWeight: 600, opacity: 0.75, marginBottom: 6, letterSpacing: '0.02em', textTransform: 'uppercase' }}>
-        {label}
-      </div>
-      {children}
+    <label className="check">
+      <input type="checkbox" checked={checked} onChange={e => onChange(e.target.checked)} />
+      <span className="check-mark" />
+      <span className="check-label">{label}</span>
     </label>
   )
 }
 
-function Toggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
+function KickLogo() {
   return (
-    <button
-      type="button"
-      onClick={() => onChange(!checked)}
-      style={{
-        padding: '10px 12px',
-        borderRadius: 10,
-        border: '1px solid ' + (checked ? '#22c55e' : '#2a2a30'),
-        background: checked ? 'rgba(34,197,94,0.12)' : '#15151a',
-        color: checked ? '#86efac' : '#a1a1aa',
-        fontWeight: 600,
-        fontSize: 13,
-        cursor: 'pointer',
-        textAlign: 'center',
-      }}
-    >
-      {checked ? '✓ ' : ''}{label}
-    </button>
+    <svg width="56" height="56" viewBox="0 0 100 100" aria-label="Kick logo" className="kick-logo">
+      <rect x="6" y="6" width="88" height="88" rx="14" fill="#53fc18"/>
+      <path d="M20 22 H34 V44 H44 V34 H54 V24 H68 V40 H58 V50 H68 V66 H54 V56 H44 V46 H34 V78 H20 Z" fill="#0a0a0a"/>
+    </svg>
   )
 }
 
-const card: React.CSSProperties = {
-  background: '#121216',
-  border: '1px solid #1f1f24',
-  borderRadius: 14,
-  padding: 22,
+const styles = `
+:root {
+  --primary: #53fc18;
+  --primary-dim: #45d414;
+  --primary-glow: rgba(83, 252, 24, 0.35);
+  --bg-base: #121212;
+  --bg-surface: #1e1e1e;
+  --bg-elevated: #2a2a2a;
+  --text-bright: #ffffff;
+  --text-dim: #a0a0a0;
+  --text-muted: #666666;
+  --border-color: #333333;
+  --border-dim: #282828;
+  --radius: 8px;
 }
 
-const input: React.CSSProperties = {
-  width: '100%',
-  background: '#1a1a1f',
-  border: '1px solid #2a2a30',
-  borderRadius: 8,
-  color: '#f0f0f2',
-  padding: '9px 11px',
-  fontSize: 14,
-  outline: 'none',
-  fontFamily: 'inherit',
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; background: var(--bg-base); color: var(--text-bright); font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif; }
+
+.page { min-height: 100vh; padding-bottom: 96px; position: relative; }
+
+/* subtle radial vignette */
+.page::after {
+  content: ""; position: fixed; inset: 0; pointer-events: none; z-index: -1;
+  background: radial-gradient(ellipse at center, transparent 0%, rgba(0,0,0,0.5) 100%);
 }
 
-const btnPrimary: React.CSSProperties = {
-  background: '#53fc18',
-  color: '#000',
-  border: 0,
-  borderRadius: 8,
-  padding: '0 18px',
-  fontWeight: 700,
-  fontSize: 13,
-  cursor: 'pointer',
-  whiteSpace: 'nowrap',
+/* ---- Hero ---- */
+.hero { padding: 40px 16px 24px; }
+.hero-inner { max-width: 600px; margin: 0 auto; display: flex; align-items: center; justify-content: center; gap: 16px; }
+.kick-logo { filter: drop-shadow(0 0 10px var(--primary-glow)) drop-shadow(0 0 20px var(--primary-glow)); animation: pulse 2s ease-in-out infinite; }
+@keyframes pulse {
+  0%,100% { filter: drop-shadow(0 0 10px var(--primary-glow)) drop-shadow(0 0 20px var(--primary-glow)); transform: scale(1); }
+  50%     { filter: drop-shadow(0 0 15px var(--primary-glow)) drop-shadow(0 0 30px var(--primary-glow)); transform: scale(1.02); }
+}
+.title { margin: 0; font-size: 32px; font-weight: 800; letter-spacing: 0.05em; text-transform: uppercase; }
+.glow-text { text-shadow: 0 0 5px var(--primary-glow), 0 0 10px var(--primary-glow), 0 0 20px var(--primary-glow); }
+@media (min-width: 640px) { .title { font-size: 38px; } }
+
+/* ---- Main ---- */
+.main { max-width: 600px; margin: 0 auto; padding: 0 16px; display: flex; flex-direction: column; gap: 20px; }
+
+/* ---- Terminal card ---- */
+.card {
+  background: var(--bg-surface);
+  border: 2px solid var(--border-color);
+  border-radius: var(--radius);
+  box-shadow: 0 0 20px rgba(83,252,24,0.06), inset 0 0 60px rgba(0,0,0,0.5);
+  position: relative;
+  overflow: hidden;
+}
+.card-header {
+  height: 36px;
+  background: var(--primary);
+  border-bottom: 2px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  position: relative;
+}
+.card-header span {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  color: #121212;
+  text-transform: uppercase;
+}
+.dots { position: absolute; left: 12px; display: flex; gap: 6px; }
+.dots i { width: 10px; height: 10px; border-radius: 50%; background: #121212; opacity: 0.4; display: inline-block; }
+.card-body { padding: 22px 22px 24px; display: flex; flex-direction: column; gap: 18px; }
+
+/* ---- Labels ---- */
+.section-label {
+  display: block;
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+.section-label.center { text-align: center; }
+
+/* ---- Inputs ---- */
+.input, .select {
+  width: 100%;
+  background: var(--bg-base);
+  border: 1px solid var(--border-dim);
+  color: var(--text-bright);
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  font-family: inherit;
+  font-size: 15px;
+  outline: none;
+  caret-color: var(--primary);
+  transition: all 0.2s ease;
+}
+.input.center { text-align: center; letter-spacing: 0.08em; }
+.input.small { padding: 8px 12px; font-size: 13px; width: 120px; text-align: center; }
+.input:focus, .select:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 1px var(--primary), 0 0 20px rgba(83,252,24,0.2);
+}
+.input:disabled { opacity: 0.4; cursor: not-allowed; }
+.input::placeholder { color: var(--text-muted); }
+.select {
+  appearance: none;
+  cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2353fc18' d='M2 4l4 4 4-4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  padding-right: 36px;
 }
 
-const btnSecondary: React.CSSProperties = {
-  background: '#2a2a30',
-  color: '#f0f0f2',
-  border: 0,
-  borderRadius: 8,
-  padding: '0 16px',
-  fontWeight: 600,
-  fontSize: 13,
-  cursor: 'pointer',
-  whiteSpace: 'nowrap',
-}
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.toggles { gap: 12px 16px; }
+.fade-row { display: flex; align-items: center; gap: 16px; }
 
-const row2: React.CSSProperties = {
-  display: 'grid',
-  gridTemplateColumns: '1fr 1fr',
-  gap: 14,
+/* ---- Checkbox ---- */
+.check { display: flex; align-items: center; gap: 10px; cursor: pointer; user-select: none; position: relative; }
+.check input { position: absolute; opacity: 0; width: 0; height: 0; }
+.check-mark {
+  width: 18px; height: 18px; flex-shrink: 0;
+  border: 1px solid var(--border-dim);
+  background: var(--bg-base);
+  border-radius: 3px;
+  display: flex; align-items: center; justify-content: center;
+  transition: all 0.15s ease;
 }
+.check-mark::after {
+  content: ""; width: 10px; height: 10px;
+  background: var(--primary);
+  border-radius: 2px;
+  box-shadow: 0 0 10px var(--primary-glow);
+  opacity: 0; transition: opacity 0.15s ease;
+}
+.check input:checked ~ .check-mark { border-color: var(--primary); box-shadow: 0 0 10px rgba(83,252,24,0.25); }
+.check input:checked ~ .check-mark::after { opacity: 1; }
+.check:hover .check-mark { border-color: var(--primary); }
+.check-label { font-size: 13px; color: var(--text-dim); letter-spacing: 0.02em; transition: color 0.15s ease; }
+.check:hover .check-label, .check input:checked ~ .check-label { color: var(--text-bright); }
+
+/* ---- Generate button ---- */
+.btn-generate {
+  margin-top: 4px;
+  background: transparent;
+  border: 2px solid var(--primary);
+  color: var(--primary);
+  font-family: inherit;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-size: 13px;
+  padding: 14px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+  transition: all 0.25s ease;
+}
+.btn-generate::before {
+  content: ""; position: absolute; top: 0; left: -100%;
+  width: 100%; height: 100%;
+  background: linear-gradient(90deg, transparent, var(--primary), transparent);
+  opacity: 0.3; transition: left 0.5s ease;
+}
+.btn-generate:hover:not(:disabled)::before { left: 100%; }
+.btn-generate:hover:not(:disabled) {
+  background: var(--primary);
+  color: #0a0a0a;
+  box-shadow: 0 0 30px var(--primary-glow);
+  transform: translateY(-2px);
+}
+.btn-generate:active:not(:disabled) { transform: translateY(0); }
+.btn-generate:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ---- URL output ---- */
+.url-output { padding: 0 22px 22px; }
+.url-box {
+  background: rgba(0,0,0,0.5);
+  border: 1px dashed var(--primary);
+  border-radius: var(--radius);
+  padding: 14px 14px 14px 32px;
+  font-size: 12px;
+  font-family: ui-monospace, "JetBrains Mono", Menlo, monospace;
+  word-break: break-all;
+  cursor: pointer;
+  position: relative;
+  text-shadow: 0 0 5px rgba(83,252,24,0.4);
+  transition: all 0.2s ease;
+}
+.url-box::before {
+  content: ">"; position: absolute; left: 12px; top: 50%;
+  transform: translateY(-50%);
+  color: var(--primary);
+  animation: blink 1s step-end infinite;
+}
+@keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
+.url-box:hover { background: rgba(83,252,24,0.08); box-shadow: 0 0 20px rgba(83,252,24,0.2); }
+
+/* ---- Messages / errors ---- */
+.error { color: #ff6b6b; font-size: 13px; text-align: center; }
+.success { color: var(--primary); font-size: 13px; display: flex; align-items: center; justify-content: center; gap: 8px; }
+.success img { width: 22px; height: 22px; border-radius: 50%; }
+
+/* ---- Preview ---- */
+.preview {
+  position: relative;
+  height: 360px;
+  background: repeating-conic-gradient(#161616 0% 25%, #1c1c1c 0% 50%) 50% / 18px 18px;
+  border: 1px solid var(--border-dim);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.preview-frame { width: 100%; height: 100%; border: 0; background: transparent; }
+.preview-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--text-muted); font-size: 13px; letter-spacing: 0.05em; text-transform: uppercase; }
+
+/* ---- Footer ---- */
+.footer {
+  position: fixed; bottom: 0; left: 0; right: 0;
+  background: linear-gradient(180deg, transparent 0%, rgba(0,0,0,0.85) 60%);
+  border-top: 1px solid rgba(83,252,24,0.2);
+  padding: 14px 16px;
+  text-align: center;
+  z-index: 50;
+}
+.footer-credit { margin: 0; font-size: 11px; letter-spacing: 0.2em; text-transform: uppercase; }
+.footer-disclaimer { margin: 4px 0 0; font-size: 11px; color: var(--text-muted); }
+.muted { color: var(--text-muted); }
+.footer-link { color: var(--primary); text-shadow: 0 0 8px var(--primary-glow); }
+.footer-disclaimer a { color: var(--text-dim); text-decoration: none; }
+.footer-disclaimer a:hover { color: var(--text-bright); }
+`

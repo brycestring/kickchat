@@ -5,13 +5,11 @@ import { connectKickChat, renderKickMessageHTML, type KickChatMessage } from '@/
 
 type Msg = KickChatMessage & { _ts: number }
 
-const FONTS: Record<string, string> = {
-  system: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif',
-  inter: '"Inter", system-ui, sans-serif',
-  mono: '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace',
-  rounded: '"SF Pro Rounded", "Nunito", system-ui, sans-serif',
-  display: '"Bebas Neue", Impact, system-ui, sans-serif',
-}
+const FONT_SIZES: Record<string, number> = { small: 14, medium: 18, large: 22, xlarge: 28 }
+const STROKE_WIDTHS: Record<string, number> = { off: 0, thin: 1, medium: 2, thick: 3, thicker: 4 }
+const BOT_USERS = new Set(
+  ['nightbot', 'botisimo', 'streamelements', 'streamlabs', 'wizebot', 'fossabot', 'kickbot'].map(s => s.toLowerCase())
+)
 
 function readQuery(): Record<string, string> {
   if (typeof window === 'undefined') return {}
@@ -26,23 +24,15 @@ export default function OverlayPage() {
   const q = typeof window !== 'undefined' ? readQuery() : {}
 
   const channel = q.channel?.toLowerCase() || ''
-  const font = FONTS[q.font || 'system'] || FONTS.system
-  const fontSize = Math.max(10, Math.min(48, Number(q.size) || 16))
-  const textColor = q.color || '#ffffff'
-  const bgMode = q.bg || 'transparent' // transparent | dark | light | custom
-  const customBg = q.bgcolor || ''
+  const fontSize = FONT_SIZES[q.size || 'medium'] ?? 18
+  const strokeWidth = STROKE_WIDTHS[q.stroke || 'off'] ?? 0
+  const animate = q.animate !== '0'
   const showBadges = q.badges !== '0'
-  const showTimestamps = q.timestamps === '1'
-  const animation = q.anim || 'slide' // slide | fade | none
-  const maxMessages = Math.max(5, Math.min(200, Number(q.max) || 40))
-  const stroke = q.stroke === '1'
-
-  // Compute container background
-  const bgColor =
-    bgMode === 'dark' ? 'rgba(15,15,17,0.85)' :
-    bgMode === 'light' ? 'rgba(255,255,255,0.85)' :
-    bgMode === 'custom' && customBg ? customBg :
-    'transparent'
+  const hideCommands = q.commands === '1' || q.commands === 'hide'
+  const hideBots = q.bots === '1' || q.bots === 'hide'
+  const fade = q.fade === '1'
+  const fadeSeconds = Math.max(2, Math.min(120, Number(q.delay) || 10))
+  const maxMessages = Math.max(5, Math.min(200, Number(q.max) || 60))
 
   useEffect(() => {
     if (!channel) {
@@ -58,10 +48,7 @@ export default function OverlayPage() {
         const r = await fetch(`/api/kick/channel/${encodeURIComponent(channel)}`)
         const data = await r.json()
         if (!r.ok || !data.chatroom_id) {
-          if (!cancelled) {
-            setStatus('error')
-            setError(data?.error || 'Channel not found')
-          }
+          if (!cancelled) { setStatus('error'); setError(data?.error || 'Channel not found') }
           return
         }
         if (cancelled) return
@@ -69,6 +56,9 @@ export default function OverlayPage() {
         stop = connectKickChat(
           data.chatroom_id,
           (m) => {
+            const text = (m.content ?? '').trim()
+            if (hideCommands && text.startsWith('!')) return
+            if (hideBots && BOT_USERS.has(m.sender.username.toLowerCase())) return
             setMessages(prev => {
               const next = [...prev, { ...m, _ts: Date.now() }]
               return next.length > maxMessages ? next.slice(next.length - maxMessages) : next
@@ -88,9 +78,19 @@ export default function OverlayPage() {
     }
     start()
     return () => { cancelled = true; if (stop) stop() }
-  }, [channel, maxMessages])
+  }, [channel, maxMessages, hideCommands, hideBots])
 
-  // Auto-scroll to bottom on new message
+  // Fade old messages off the list after fadeSeconds
+  useEffect(() => {
+    if (!fade) return
+    const t = setInterval(() => {
+      const cutoff = Date.now() - fadeSeconds * 1000
+      setMessages(prev => prev.filter(m => m._ts >= cutoff))
+    }, 1000)
+    return () => clearInterval(t)
+  }, [fade, fadeSeconds])
+
+  // Auto-scroll
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
@@ -106,58 +106,49 @@ export default function OverlayPage() {
         padding: '12px',
         overflowY: 'auto',
         overflowX: 'hidden',
-        background: bgColor,
-        color: textColor,
-        fontFamily: font,
+        background: 'transparent',
+        color: '#ffffff',
+        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif',
         fontSize: `${fontSize}px`,
         lineHeight: 1.35,
         wordWrap: 'break-word',
-        textShadow: stroke ? '0 0 2px #000, 0 0 2px #000, 0 0 2px #000, 0 0 2px #000' : 'none',
-        // Hide scrollbar — OBS doesn't need it
+        WebkitTextStroke: strokeWidth ? `${strokeWidth}px #000` : undefined,
         scrollbarWidth: 'none',
       }}
     >
       <style>{`
         .kc-msg { padding: 4px 0; }
-        .kc-msg.anim-slide { animation: kcSlideIn .25s ease-out; }
-        .kc-msg.anim-fade  { animation: kcFadeIn .25s ease-out; }
-        @keyframes kcSlideIn { from { opacity: 0; transform: translateX(-12px); } to { opacity: 1; transform: none; } }
-        @keyframes kcFadeIn  { from { opacity: 0; } to { opacity: 1; } }
+        .kc-msg.anim { animation: kcIn .25s ease-out; }
+        @keyframes kcIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
         .kc-name { font-weight: 800; }
         .kc-emote { display: inline-block; height: 1.6em; vertical-align: middle; margin: -2px 1px; }
-        .kc-badge { display: inline-flex; align-items: center; justify-content: center; padding: 0 5px; height: 1.1em; line-height: 1.1em; font-size: 0.65em; font-weight: 800; border-radius: 4px; margin-right: 4px; vertical-align: middle; text-transform: uppercase; letter-spacing: 0.04em; }
-        .kc-time { opacity: 0.55; font-size: 0.75em; margin-right: 6px; font-variant-numeric: tabular-nums; }
+        .kc-badge { display: inline-flex; align-items: center; justify-content: center; padding: 0 5px; height: 1.1em; line-height: 1.1em; font-size: 0.65em; font-weight: 800; border-radius: 4px; margin-right: 4px; vertical-align: middle; text-transform: uppercase; letter-spacing: 0.04em; -webkit-text-stroke: 0; }
         ::-webkit-scrollbar { display: none; }
       `}</style>
 
       {status === 'error' && (
-        <div style={{ opacity: 0.7, fontSize: '13px' }}>⚠ {error}</div>
+        <div style={{ opacity: 0.7, fontSize: '13px', WebkitTextStroke: 0 }}>⚠ {error}</div>
       )}
       {(status === 'looking-up' || status === 'connecting') && messages.length === 0 && (
-        <div style={{ opacity: 0.4, fontSize: '13px' }}>Connecting to #{channel}…</div>
+        <div style={{ opacity: 0.4, fontSize: '13px', WebkitTextStroke: 0 }}>Connecting to #{channel}…</div>
       )}
 
       {messages.map(m => {
         const userColor = m.sender.identity?.color || '#a3a3a3'
-        const badges = (m.sender.identity?.badges ?? []).filter(b => showBadges)
-        const time = new Date(m.created_at || m._ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        const badges = (m.sender.identity?.badges ?? []).filter(() => showBadges)
         return (
-          <div
-            key={m.id}
-            className={`kc-msg ${animation !== 'none' ? `anim-${animation}` : ''}`}
-          >
-            {showTimestamps && <span className="kc-time">{time}</span>}
+          <div key={m.id} className={`kc-msg ${animate ? 'anim' : ''}`}>
             {badges.map((b, i) => (
               <span key={`${b.type}-${i}`}
                 className="kc-badge"
-                style={{ background: badgeBg(b.type), color: badgeFg(b.type) }}
+                style={{ background: badgeBg(b.type), color: '#fff' }}
                 title={b.text || b.type}
               >
                 {badgeLabel(b)}
               </span>
             ))}
             <span className="kc-name" style={{ color: userColor }}>{m.sender.username}</span>
-            <span style={{ color: textColor, opacity: 0.7, margin: '0 4px' }}>:</span>
+            <span style={{ opacity: 0.7, margin: '0 4px' }}>:</span>
             <span dangerouslySetInnerHTML={{ __html: renderKickMessageHTML(m.content) }} />
           </div>
         )
@@ -180,7 +171,6 @@ function badgeBg(type: string): string {
     default:            return '#555'
   }
 }
-function badgeFg(_type: string): string { return '#fff' }
 function badgeLabel(b: { type: string; count?: number; text?: string }): string {
   if (b.type === 'broadcaster') return 'host'
   if (b.type === 'moderator')   return 'mod'
