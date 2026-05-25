@@ -58,10 +58,19 @@ function buildQuery(s: Settings): string {
   return p.toString()
 }
 
+interface ChannelInfo {
+  chatroomId: number
+  channelId: number
+  displayName: string
+  avatarUrl: string | null
+  isLive: boolean
+  subBadges: { m: number; s: string }[]   // months desc, src
+}
+
 export default function SettingsPage() {
   const [s, setS] = useState<Settings>(DEFAULTS)
   const [origin, setOrigin] = useState('')
-  const [verified, setVerified] = useState<null | { display_name: string; avatar_url: string | null; is_live: boolean }>(null)
+  const [info, setInfo] = useState<ChannelInfo | null>(null)
   const [verifyError, setVerifyError] = useState<string | null>(null)
   const [generated, setGenerated] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -78,10 +87,25 @@ export default function SettingsPage() {
     try { localStorage.setItem('kc-settings', JSON.stringify(s)) } catch {}
   }, [s])
 
+  // Invalidate the cached channel info if the user changes the channel name.
+  useEffect(() => {
+    setInfo(null)
+    setGenerated(false)
+    setVerifyError(null)
+  }, [s.channel])
+
   const overlayUrl = useMemo(() => {
-    if (!origin || !s.channel.trim()) return ''
-    return `${origin}/overlay?${buildQuery(s)}`
-  }, [origin, s])
+    if (!origin || !info) return ''
+    const p = new URLSearchParams(buildQuery(s))
+    p.set('cid', String(info.chatroomId))
+    if (info.subBadges.length) {
+      // Compact JSON, then base64 (URL-safe) so OBS doesn't need to hit Kick's API.
+      const json = JSON.stringify(info.subBadges)
+      const b64 = btoa(json).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+      p.set('sb', b64)
+    }
+    return `${origin}/overlay?${p.toString()}`
+  }, [origin, s, info])
 
   function set<K extends keyof Settings>(key: K, val: Settings[K]) {
     setS(prev => ({ ...prev, [key]: val }))
@@ -91,12 +115,10 @@ export default function SettingsPage() {
     e.preventDefault()
     const u = s.channel.trim().toLowerCase()
     if (!u) return
-    setVerified(null)
+    setInfo(null)
     setVerifyError(null)
     setGenerated(false)
     try {
-      // Browser-side fetch — Kick blocks server IPs (Cloudflare) but
-      // allows CORS requests from browsers.
       const r = await fetch(`https://kick.com/api/v2/channels/${encodeURIComponent(u)}`, {
         headers: { 'Accept': 'application/json' },
       })
@@ -105,14 +127,23 @@ export default function SettingsPage() {
         return
       }
       const data = await r.json()
-      if (!data?.chatroom?.id) {
+      const chatroomId = data?.chatroom?.id
+      if (!chatroomId) {
         setVerifyError('No chatroom found for channel')
         return
       }
-      setVerified({
-        display_name: data?.user?.username ?? u,
-        avatar_url: data?.user?.profile_pic ?? null,
-        is_live: !!data?.livestream,
+      type RawSubBadge = { months?: number; badge_image?: { src?: string } }
+      const subs: { m: number; s: string }[] = (data?.subscriber_badges ?? [])
+        .map((b: RawSubBadge) => ({ m: b.months ?? 0, s: b.badge_image?.src ?? '' }))
+        .filter((b: { m: number; s: string }) => b.s)
+        .sort((a: { m: number }, b: { m: number }) => b.m - a.m)
+      setInfo({
+        chatroomId,
+        channelId: data?.chatroom?.channel_id ?? data?.id ?? 0,
+        displayName: data?.user?.username ?? u,
+        avatarUrl: data?.user?.profile_pic ?? null,
+        isLive: !!data?.livestream,
+        subBadges: subs,
       })
       setGenerated(true)
     } catch (err) {
@@ -215,10 +246,10 @@ export default function SettingsPage() {
             </div>
 
             {verifyError && <div className="error">⚠ {verifyError}</div>}
-            {verified && generated && (
+            {info && generated && (
               <div className="success">
-                {verified.avatar_url && <img src={verified.avatar_url} alt="" />}
-                Found <b>{verified.display_name}</b>{verified.is_live ? ' — live now' : ''}
+                {info.avatarUrl && <img src={info.avatarUrl} alt="" />}
+                Found <b>{info.displayName}</b>{info.isLive ? ' — live now' : ''}
               </div>
             )}
 

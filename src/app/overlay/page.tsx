@@ -16,27 +16,40 @@ const SHADOWS: Record<string, string> = {
 const BOT_USERS = new Set(
   ['nightbot', 'botisimo', 'streamelements', 'streamlabs', 'wizebot', 'fossabot', 'kickbot'].map(s => s.toLowerCase())
 )
-
-// Badge types we ship local SVGs for. Anything else falls back to a generic chip.
 const LOCAL_BADGES = new Set(['broadcaster', 'moderator', 'verified', 'vip', 'og', 'founder', 'sub_gifter', 'staff'])
 
-interface SubBadge { months: number; src: string }
+interface SubBadge { m: number; s: string }
 
 function readQuery(): Record<string, string> {
   if (typeof window === 'undefined') return {}
   return Object.fromEntries(new URLSearchParams(window.location.search))
 }
 
+function decodeSubBadges(b64: string | undefined): SubBadge[] {
+  if (!b64) return []
+  try {
+    const std = b64.replace(/-/g, '+').replace(/_/g, '/')
+    const pad = std.length % 4 === 0 ? '' : '='.repeat(4 - (std.length % 4))
+    const json = atob(std + pad)
+    const parsed = JSON.parse(json)
+    if (!Array.isArray(parsed)) return []
+    return parsed
+      .filter((b: { m?: unknown; s?: unknown }) => typeof b?.m === 'number' && typeof b?.s === 'string')
+      .sort((a: SubBadge, b: SubBadge) => b.m - a.m)
+  } catch { return [] }
+}
+
 export default function OverlayPage() {
   const [messages, setMessages] = useState<Msg[]>([])
   const [status, setStatus] = useState<'init' | 'looking-up' | 'connecting' | 'connected' | 'error'>('init')
   const [error, setError] = useState<string | null>(null)
-  // Channel-specific subscriber badges (sorted desc by months).
-  const subBadgesRef = useRef<SubBadge[]>([])
   const containerRef = useRef<HTMLDivElement>(null)
   const q = typeof window !== 'undefined' ? readQuery() : {}
 
   const channel = q.channel?.toLowerCase() || ''
+  const chatroomIdFromUrl = Number(q.cid) || 0
+  const subBadges = useRef<SubBadge[]>(decodeSubBadges(q.sb))
+
   const fontSize = FONT_SIZES[q.size || 'medium'] ?? 18
   const strokeWidth = STROKE_WIDTHS[q.stroke || 'off'] ?? 0
   const textShadow = SHADOWS[q.shadow || 'off'] ?? 'none'
@@ -49,63 +62,77 @@ export default function OverlayPage() {
   const maxMessages = Math.max(5, Math.min(200, Number(q.max) || 60))
 
   useEffect(() => {
-    if (!channel) {
+    if (!chatroomIdFromUrl && !channel) {
       setStatus('error')
-      setError('Add ?channel=<kick_username> to the URL.')
+      setError('Missing channel or chatroom id in URL.')
       return
     }
     let cancelled = false
     let stop: (() => void) | null = null
+
     async function start() {
-      setStatus('looking-up')
-      try {
-        const r = await fetch(`https://kick.com/api/v2/channels/${encodeURIComponent(channel)}`, {
-          headers: { 'Accept': 'application/json' },
-        })
-        if (!r.ok) {
-          if (!cancelled) { setStatus('error'); setError(r.status === 404 ? 'Channel not found' : `Kick API ${r.status}`) }
-          return
-        }
-        const data = await r.json()
-        if (!data?.chatroom?.id) {
-          if (!cancelled) { setStatus('error'); setError('No chatroom found') }
-          return
-        }
-        // Channel sub-badges (sorted from highest tier to lowest so we can match the highest level the user qualifies for).
-        type RawSubBadge = { months?: number; badge_image?: { src?: string } }
-        const rawSubs: RawSubBadge[] = data?.subscriber_badges ?? []
-        subBadgesRef.current = rawSubs
-          .map(b => ({ months: b.months ?? 0, src: b.badge_image?.src ?? '' }))
-          .filter(b => b.src)
-          .sort((a, b) => b.months - a.months)
-        if (cancelled) return
-        setStatus('connecting')
-        stop = connectKickChat(
-          data.chatroom.id,
-          (m) => {
-            const text = (m.content ?? '').trim()
-            if (hideCommands && text.startsWith('!')) return
-            if (hideBots && BOT_USERS.has(m.sender.username.toLowerCase())) return
-            setMessages(prev => {
-              const next = [...prev, { ...m, _ts: Date.now() }]
-              return next.length > maxMessages ? next.slice(next.length - maxMessages) : next
-            })
-          },
-          (s) => {
-            if (s === 'connected') setStatus('connected')
-            else if (s === 'error') { setStatus('error'); setError('WebSocket error') }
+      let chatroomId = chatroomIdFromUrl
+
+      // Primary path: chatroom_id is already in the URL — no Kick API call needed.
+      // This is the path used when the overlay URL came from the settings page,
+      // which is critical for OBS where Kick blocks API access (no Cloudflare
+      // cookies in the OBS browser).
+      if (!chatroomId) {
+        setStatus('looking-up')
+        try {
+          const r = await fetch(`https://kick.com/api/v2/channels/${encodeURIComponent(channel)}`, {
+            headers: { 'Accept': 'application/json' },
+          })
+          if (!r.ok) {
+            if (!cancelled) {
+              setStatus('error')
+              setError(r.status === 404 ? 'Channel not found' : `Kick API ${r.status} — regenerate the overlay URL from the settings page`)
+            }
+            return
           }
-        )
-      } catch (err) {
-        if (!cancelled) {
-          setStatus('error')
-          setError(err instanceof Error ? err.message : 'Connect failed')
+          const data = await r.json()
+          if (!data?.chatroom?.id) {
+            if (!cancelled) { setStatus('error'); setError('No chatroom for channel') }
+            return
+          }
+          chatroomId = data.chatroom.id
+          type RawSubBadge = { months?: number; badge_image?: { src?: string } }
+          subBadges.current = (data?.subscriber_badges ?? [])
+            .map((b: RawSubBadge) => ({ m: b.months ?? 0, s: b.badge_image?.src ?? '' }))
+            .filter((b: SubBadge) => b.s)
+            .sort((a: SubBadge, b: SubBadge) => b.m - a.m)
+        } catch (err) {
+          if (!cancelled) {
+            setStatus('error')
+            setError(err instanceof Error ? err.message : 'Lookup failed')
+          }
+          return
         }
       }
+
+      if (cancelled) return
+      setStatus('connecting')
+      stop = connectKickChat(
+        chatroomId,
+        (m) => {
+          const text = (m.content ?? '').trim()
+          if (hideCommands && text.startsWith('!')) return
+          if (hideBots && BOT_USERS.has(m.sender.username.toLowerCase())) return
+          setMessages(prev => {
+            const next = [...prev, { ...m, _ts: Date.now() }]
+            return next.length > maxMessages ? next.slice(next.length - maxMessages) : next
+          })
+        },
+        (s) => {
+          if (s === 'connected') setStatus('connected')
+          else if (s === 'error') { setStatus('error'); setError('WebSocket error') }
+        }
+      )
     }
+
     start()
     return () => { cancelled = true; if (stop) stop() }
-  }, [channel, maxMessages, hideCommands, hideBots])
+  }, [channel, chatroomIdFromUrl, maxMessages, hideCommands, hideBots])
 
   useEffect(() => {
     if (!fade) return
@@ -125,11 +152,8 @@ export default function OverlayPage() {
   function resolveBadgeSrc(type: string, count?: number): string | null {
     if (type === 'subscriber') {
       const m = count ?? 0
-      const match = subBadgesRef.current.find(b => m >= b.months)
-      return match?.src ?? null
-    }
-    if (type === 'sub_gifter') {
-      return '/badges/sub_gifter.svg'
+      const match = subBadges.current.find(b => m >= b.m)
+      return match?.s ?? null
     }
     if (LOCAL_BADGES.has(type)) return `/badges/${type}.svg`
     return null
@@ -167,10 +191,17 @@ export default function OverlayPage() {
       `}</style>
 
       {status === 'error' && (
-        <div style={{ opacity: 0.7, fontSize: '13px', WebkitTextStroke: 0 }}>⚠ {error}</div>
+        <div style={{ opacity: 0.7, fontSize: '13px', WebkitTextStroke: 0, textShadow: 'none' }}>⚠ {error}</div>
       )}
-      {(status === 'looking-up' || status === 'connecting') && messages.length === 0 && (
-        <div style={{ opacity: 0.4, fontSize: '13px', WebkitTextStroke: 0 }}>Connecting to #{channel}…</div>
+      {status !== 'error' && status !== 'connected' && messages.length === 0 && (
+        <div style={{ opacity: 0.4, fontSize: '13px', WebkitTextStroke: 0, textShadow: 'none' }}>
+          Connecting{channel ? ` to #${channel}` : ''}…
+        </div>
+      )}
+      {status === 'connected' && messages.length === 0 && (
+        <div style={{ opacity: 0.4, fontSize: '13px', WebkitTextStroke: 0, textShadow: 'none' }}>
+          Connected{channel ? ` to #${channel}` : ''} — waiting for messages…
+        </div>
       )}
 
       {messages.map(m => {
