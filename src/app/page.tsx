@@ -642,6 +642,7 @@ html, body { margin: 0; padding: 0; background: var(--bg-base); color: var(--tex
 .preview-chat {
   font-family: var(--font-open-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
   color: #ffffff;
+  font-weight: 800;
   line-height: 1.4;
   word-wrap: break-word;
 }
@@ -659,7 +660,8 @@ html, body { margin: 0; padding: 0; background: var(--bg-base); color: var(--tex
   text-shadow: none;
 }
 .sample-name { font-weight: 800; }
-.sample-colon { opacity: 0.65; margin: 0 2px; }
+.sample-colon { margin: 0 2px; }
+.sample-text { font-weight: 800; }
 .sample-emote { display: inline-block; height: 1.6em; vertical-align: middle; margin: -2px 2px; -webkit-text-stroke: 0; }
 
 /* ---- Footer ---- */

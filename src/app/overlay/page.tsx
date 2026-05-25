@@ -123,6 +123,7 @@ export default function OverlayPage() {
         background: 'transparent',
         color: '#ffffff',
         fontFamily: 'var(--font-open-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif',
+        fontWeight: 800,
         fontSize: `${fontSize}px`,
         lineHeight: 1.35,
         wordWrap: 'break-word',
