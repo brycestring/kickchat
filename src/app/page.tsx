@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 type Size = 'small' | 'medium' | 'large' | 'xlarge'
 type Stroke = 'off' | 'thin' | 'medium' | 'thick' | 'thicker'
@@ -278,15 +278,65 @@ const SAMPLES: SampleMsg[] = [
   { badges: [{ type: 'subscriber', label: 'sub 12' }], username: 'CoolViewer42', color: '#1e90ff', text: 'this clip was insane' },
   { badges: [{ type: 'vip', label: 'vip' }], username: 'KickFan', color: '#ff66c4', text: 'LETSGO', emote: { id: '37226', name: 'KEKW' } },
   { badges: [], username: 'newchatter', color: '#ffa94d', text: 'first time here, looks fun' },
+  { badges: [{ type: 'subscriber', label: 'sub 3' }], username: 'BigGreen', color: '#ffd93d', text: 'kekw kekw kekw' },
+  { badges: [], username: 'lurker99', color: '#a78bfa', text: 'pog' },
+  { badges: [{ type: 'moderator', label: 'mod' }], username: 'mod_alex', color: '#0e8c4a', text: 'no spoilers!' },
+  { badges: [], username: 'gamer_ts', color: '#22d3ee', text: 'GG WP that was insane' },
+  { badges: [{ type: 'vip', label: 'vip' }], username: 'TwitchRefugee', color: '#f97316', text: 'kick chat hits different' },
 ]
+
+const MAX_VISIBLE = 6
+
+interface VisibleMsg extends SampleMsg { uid: number }
 
 function SamplePreview({ s }: { s: Settings }) {
   const fontSize = FONT_SIZES_PX[s.size]
   const strokeWidth = STROKE_PX[s.stroke]
   const shadow = SHADOW_CSS[s.shadow]
+  const [msgs, setMsgs] = useState<VisibleMsg[]>([])
+  const indexRef = useRef(0)
+  const uidRef = useRef(0)
+  const scrollRef = useRef<HTMLDivElement>(null)
+
+  // Seed initial messages
+  useEffect(() => {
+    const initial: VisibleMsg[] = []
+    for (let i = 0; i < 3; i++) {
+      const sample = SAMPLES[indexRef.current % SAMPLES.length]
+      initial.push({ ...sample, uid: uidRef.current++ })
+      indexRef.current++
+    }
+    setMsgs(initial)
+  }, [])
+
+  // Stream a new message every 2-3.5s to mimic live chat
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout>
+    function schedule() {
+      const delay = 1800 + Math.random() * 1700
+      timer = setTimeout(() => {
+        const sample = SAMPLES[indexRef.current % SAMPLES.length]
+        indexRef.current++
+        setMsgs(prev => {
+          const next = [...prev, { ...sample, uid: uidRef.current++ }]
+          return next.length > MAX_VISIBLE ? next.slice(next.length - MAX_VISIBLE) : next
+        })
+        schedule()
+      }, delay)
+    }
+    schedule()
+    return () => clearTimeout(timer)
+  }, [])
+
+  // Auto-scroll to bottom on new message
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    el.scrollTop = el.scrollHeight
+  }, [msgs])
 
   return (
-    <div className="preview">
+    <div className="preview" ref={scrollRef}>
       <div
         className="preview-chat"
         style={{
@@ -295,8 +345,8 @@ function SamplePreview({ s }: { s: Settings }) {
           textShadow: shadow,
         }}
       >
-        {SAMPLES.map((m, i) => (
-          <div key={i} className={`sample-msg ${s.animate ? 'anim' : ''}`} style={{ animationDelay: `${i * 0.08}s` }}>
+        {msgs.map(m => (
+          <div key={m.uid} className={`sample-msg ${s.animate ? 'anim' : ''}`}>
             {s.badges && m.badges.map((b, j) => (
               <span key={j} className="sample-badge" style={{ background: badgeBg(b.type) }}>{b.label}</span>
             ))}
@@ -342,10 +392,24 @@ function Check({ label, checked, onChange }: { label: string; checked: boolean; 
 }
 
 function KickLogo() {
+  // Kick's pixel-K mark: chunky blocks forming a stylized K.
   return (
-    <svg width="56" height="56" viewBox="0 0 100 100" aria-label="Kick logo" className="kick-logo">
-      <rect x="6" y="6" width="88" height="88" rx="14" fill="#53fc18"/>
-      <path d="M20 22 H34 V44 H44 V34 H54 V24 H68 V40 H58 V50 H68 V66 H54 V56 H44 V46 H34 V78 H20 Z" fill="#0a0a0a"/>
+    <svg width="64" height="64" viewBox="0 0 100 100" aria-label="Kick logo" className="kick-logo">
+      <rect width="100" height="100" rx="18" fill="#53fc18"/>
+      <g fill="#0a0a0a">
+        {/* Spine */}
+        <rect x="18" y="22" width="16" height="56"/>
+        {/* Center connector (joins spine to diagonal) */}
+        <rect x="34" y="42" width="16" height="16"/>
+        {/* Upper inner step */}
+        <rect x="50" y="30" width="16" height="14"/>
+        {/* Upper outer tip */}
+        <rect x="66" y="22" width="16" height="14"/>
+        {/* Lower inner step */}
+        <rect x="50" y="56" width="16" height="14"/>
+        {/* Lower outer tip */}
+        <rect x="66" y="64" width="16" height="14"/>
+      </g>
     </svg>
   )
 }
@@ -561,23 +625,29 @@ html, body { margin: 0; padding: 0; background: var(--bg-base); color: var(--tex
 /* ---- Preview ---- */
 .preview {
   position: relative;
-  min-height: 240px;
+  height: 280px;
   background:
     linear-gradient(135deg, rgba(83,252,24,0.04), transparent 50%),
     repeating-conic-gradient(#171717 0% 25%, #1d1d1d 0% 50%) 50% / 18px 18px;
   border: 1px solid var(--border-dim);
   border-radius: var(--radius);
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
   padding: 14px 16px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(83,252,24,0.25) transparent;
 }
+.preview::-webkit-scrollbar { width: 4px; }
+.preview::-webkit-scrollbar-thumb { background: rgba(83,252,24,0.25); border-radius: 2px; }
 .preview-chat {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+  font-family: var(--font-open-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
   color: #ffffff;
   line-height: 1.4;
+  word-wrap: break-word;
 }
 .sample-msg { padding: 4px 0; }
-.sample-msg.anim { animation: sampleIn .4s ease-out both; }
-@keyframes sampleIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.sample-msg.anim { animation: sampleIn .35s ease-out both; }
+@keyframes sampleIn { from { opacity: 0; transform: translateX(-10px); } to { opacity: 1; transform: none; } }
 .sample-badge {
   display: inline-flex; align-items: center; justify-content: center;
   padding: 0 5px; height: 1.1em; line-height: 1.1em;

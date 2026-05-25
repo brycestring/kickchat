@@ -122,7 +122,7 @@ export default function OverlayPage() {
         overflowX: 'hidden',
         background: 'transparent',
         color: '#ffffff',
-        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif',
+        fontFamily: 'var(--font-open-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif',
         fontSize: `${fontSize}px`,
         lineHeight: 1.35,
         wordWrap: 'break-word',
