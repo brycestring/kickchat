@@ -17,6 +17,11 @@ const BOT_USERS = new Set(
   ['nightbot', 'botisimo', 'streamelements', 'streamlabs', 'wizebot', 'fossabot', 'kickbot'].map(s => s.toLowerCase())
 )
 
+// Badge types we ship local SVGs for. Anything else falls back to a generic chip.
+const LOCAL_BADGES = new Set(['broadcaster', 'moderator', 'verified', 'vip', 'og', 'founder', 'sub_gifter', 'staff'])
+
+interface SubBadge { months: number; src: string }
+
 function readQuery(): Record<string, string> {
   if (typeof window === 'undefined') return {}
   return Object.fromEntries(new URLSearchParams(window.location.search))
@@ -26,6 +31,8 @@ export default function OverlayPage() {
   const [messages, setMessages] = useState<Msg[]>([])
   const [status, setStatus] = useState<'init' | 'looking-up' | 'connecting' | 'connected' | 'error'>('init')
   const [error, setError] = useState<string | null>(null)
+  // Channel-specific subscriber badges (sorted desc by months).
+  const subBadgesRef = useRef<SubBadge[]>([])
   const containerRef = useRef<HTMLDivElement>(null)
   const q = typeof window !== 'undefined' ? readQuery() : {}
 
@@ -52,7 +59,6 @@ export default function OverlayPage() {
     async function start() {
       setStatus('looking-up')
       try {
-        // Browser-side fetch — Kick blocks server IPs (Cloudflare).
         const r = await fetch(`https://kick.com/api/v2/channels/${encodeURIComponent(channel)}`, {
           headers: { 'Accept': 'application/json' },
         })
@@ -65,6 +71,13 @@ export default function OverlayPage() {
           if (!cancelled) { setStatus('error'); setError('No chatroom found') }
           return
         }
+        // Channel sub-badges (sorted from highest tier to lowest so we can match the highest level the user qualifies for).
+        type RawSubBadge = { months?: number; badge_image?: { src?: string } }
+        const rawSubs: RawSubBadge[] = data?.subscriber_badges ?? []
+        subBadgesRef.current = rawSubs
+          .map(b => ({ months: b.months ?? 0, src: b.badge_image?.src ?? '' }))
+          .filter(b => b.src)
+          .sort((a, b) => b.months - a.months)
         if (cancelled) return
         setStatus('connecting')
         stop = connectKickChat(
@@ -94,7 +107,6 @@ export default function OverlayPage() {
     return () => { cancelled = true; if (stop) stop() }
   }, [channel, maxMessages, hideCommands, hideBots])
 
-  // Fade old messages off the list after fadeSeconds
   useEffect(() => {
     if (!fade) return
     const t = setInterval(() => {
@@ -104,12 +116,24 @@ export default function OverlayPage() {
     return () => clearInterval(t)
   }, [fade, fadeSeconds])
 
-  // Auto-scroll
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
     el.scrollTop = el.scrollHeight
   }, [messages])
+
+  function resolveBadgeSrc(type: string, count?: number): string | null {
+    if (type === 'subscriber') {
+      const m = count ?? 0
+      const match = subBadgesRef.current.find(b => m >= b.months)
+      return match?.src ?? null
+    }
+    if (type === 'sub_gifter') {
+      return '/badges/sub_gifter.svg'
+    }
+    if (LOCAL_BADGES.has(type)) return `/badges/${type}.svg`
+    return null
+  }
 
   return (
     <div
@@ -135,11 +159,10 @@ export default function OverlayPage() {
       <style>{`
         .kc-msg { padding: 4px 0; }
         .kc-msg.anim { animation: kcIn .25s ease-out; }
-        @keyframes kcIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+        @keyframes kcIn { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: none; } }
         .kc-name { font-weight: 800; }
-        .kc-emote { display: inline-block; height: 1.6em; vertical-align: middle; margin: -2px 1px; }
-        .kc-badge { display: inline-flex; align-items: center; justify-content: center; padding: 0 5px; height: 1.1em; line-height: 1.1em; font-size: 0.65em; font-weight: 800; border-radius: 4px; margin-right: 4px; vertical-align: middle; text-transform: uppercase; letter-spacing: 0.04em; -webkit-text-stroke: 0; text-shadow: none; }
-        .kc-emote { -webkit-text-stroke: 0; }
+        .kc-emote { display: inline-block; height: 1.6em; vertical-align: middle; margin: -2px 1px; -webkit-text-stroke: 0; text-shadow: none; }
+        .kc-badge-img { display: inline-block; width: 1.15em; height: 1.15em; vertical-align: -0.18em; margin-right: 4px; border-radius: 3px; -webkit-text-stroke: 0; text-shadow: none; }
         ::-webkit-scrollbar { display: none; }
       `}</style>
 
@@ -152,18 +175,17 @@ export default function OverlayPage() {
 
       {messages.map(m => {
         const userColor = m.sender.identity?.color || '#a3a3a3'
-        const badges = (m.sender.identity?.badges ?? []).filter(() => showBadges)
+        const badges = showBadges ? (m.sender.identity?.badges ?? []) : []
         return (
           <div key={m.id} className={`kc-msg ${animate ? 'anim' : ''}`}>
-            {badges.map((b, i) => (
-              <span key={`${b.type}-${i}`}
-                className="kc-badge"
-                style={{ background: badgeBg(b.type), color: '#fff' }}
-                title={b.text || b.type}
-              >
-                {badgeLabel(b)}
-              </span>
-            ))}
+            {badges.map((b, i) => {
+              const src = resolveBadgeSrc(b.type, b.count)
+              if (!src) return null
+              return (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img key={`${b.type}-${i}`} className="kc-badge-img" src={src} alt={b.type} title={b.text || b.type} />
+              )
+            })}
             <span className="kc-name" style={{ color: userColor }}>{m.sender.username}</span>
             <span style={{ opacity: 0.7, margin: '0 4px' }}>:</span>
             <span dangerouslySetInnerHTML={{ __html: renderKickMessageHTML(m.content) }} />
@@ -172,31 +194,4 @@ export default function OverlayPage() {
       })}
     </div>
   )
-}
-
-function badgeBg(type: string): string {
-  switch (type) {
-    case 'broadcaster': return '#e0245e'
-    case 'moderator':   return '#0e8c4a'
-    case 'verified':    return '#1d9bf0'
-    case 'vip':         return '#a020f0'
-    case 'og':          return '#f59e0b'
-    case 'founder':     return '#f59e0b'
-    case 'subscriber':  return '#5865f2'
-    case 'sub_gifter':  return '#5865f2'
-    case 'staff':       return '#555'
-    default:            return '#555'
-  }
-}
-function badgeLabel(b: { type: string; count?: number; text?: string }): string {
-  if (b.type === 'broadcaster') return 'host'
-  if (b.type === 'moderator')   return 'mod'
-  if (b.type === 'verified')    return '✓'
-  if (b.type === 'vip')         return 'vip'
-  if (b.type === 'og')          return 'og'
-  if (b.type === 'founder')     return 'founder'
-  if (b.type === 'subscriber')  return b.count ? `sub ${b.count}` : 'sub'
-  if (b.type === 'sub_gifter')  return 'gifter'
-  if (b.type === 'staff')       return 'staff'
-  return b.text || b.type
 }

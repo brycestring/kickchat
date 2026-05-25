@@ -265,7 +265,7 @@ export default function SettingsPage() {
 }
 
 interface SampleMsg {
-  badges: { type: string; label: string }[]
+  badges: string[]
   username: string
   color: string
   text: string
@@ -273,16 +273,17 @@ interface SampleMsg {
 }
 
 const SAMPLES: SampleMsg[] = [
-  { badges: [{ type: 'broadcaster', label: 'host' }], username: 'streamer', color: '#53fc18', text: 'welcome to the stream 🎮' },
-  { badges: [{ type: 'moderator', label: 'mod' }], username: 'mod_alex', color: '#0e8c4a', text: 'rules in the description!' },
-  { badges: [{ type: 'subscriber', label: 'sub 12' }], username: 'CoolViewer42', color: '#1e90ff', text: 'this clip was insane' },
-  { badges: [{ type: 'vip', label: 'vip' }], username: 'KickFan', color: '#ff66c4', text: 'LETSGO', emote: { id: '37226', name: 'KEKW' } },
+  { badges: ['broadcaster'], username: 'streamer', color: '#53fc18', text: 'welcome to the stream 🎮' },
+  { badges: ['moderator'], username: 'mod_alex', color: '#0e8c4a', text: 'rules in the description!' },
+  { badges: ['verified', 'og'], username: 'CoolViewer42', color: '#1e90ff', text: 'this clip was insane' },
+  { badges: ['vip'], username: 'KickFan', color: '#ff66c4', text: 'LETSGO', emote: { id: '37226', name: 'KEKW' } },
   { badges: [], username: 'newchatter', color: '#ffa94d', text: 'first time here, looks fun' },
-  { badges: [{ type: 'subscriber', label: 'sub 3' }], username: 'BigGreen', color: '#ffd93d', text: 'kekw kekw kekw' },
+  { badges: ['founder'], username: 'BigGreen', color: '#ffd93d', text: 'kekw kekw kekw' },
   { badges: [], username: 'lurker99', color: '#a78bfa', text: 'pog' },
-  { badges: [{ type: 'moderator', label: 'mod' }], username: 'mod_alex', color: '#0e8c4a', text: 'no spoilers!' },
-  { badges: [], username: 'gamer_ts', color: '#22d3ee', text: 'GG WP that was insane' },
-  { badges: [{ type: 'vip', label: 'vip' }], username: 'TwitchRefugee', color: '#f97316', text: 'kick chat hits different' },
+  { badges: ['moderator', 'sub_gifter'], username: 'mod_alex', color: '#0e8c4a', text: 'no spoilers!' },
+  { badges: ['verified'], username: 'gamer_ts', color: '#22d3ee', text: 'GG WP that was insane' },
+  { badges: ['vip', 'sub_gifter'], username: 'TwitchRefugee', color: '#f97316', text: 'kick chat hits different' },
+  { badges: ['staff'], username: 'KickStaff', color: '#9333ea', text: 'enjoy the stream everyone' },
 ]
 
 const MAX_VISIBLE = 6
@@ -347,8 +348,15 @@ function SamplePreview({ s }: { s: Settings }) {
       >
         {msgs.map(m => (
           <div key={m.uid} className={`sample-msg ${s.animate ? 'anim' : ''}`}>
-            {s.badges && m.badges.map((b, j) => (
-              <span key={j} className="sample-badge" style={{ background: badgeBg(b.type) }}>{b.label}</span>
+            {s.badges && m.badges.map((type, j) => (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                key={j}
+                className="sample-badge-img"
+                src={`/badges/${type}.svg`}
+                alt={type}
+                title={type}
+              />
             ))}
             <span className="sample-name" style={{ color: m.color }}>{m.username}</span>
             <span className="sample-colon">: </span>
@@ -369,16 +377,6 @@ function SamplePreview({ s }: { s: Settings }) {
       </div>
     </div>
   )
-}
-
-function badgeBg(type: string): string {
-  switch (type) {
-    case 'broadcaster': return '#e0245e'
-    case 'moderator':   return '#0e8c4a'
-    case 'vip':         return '#a020f0'
-    case 'subscriber':  return '#5865f2'
-    default:            return '#555'
-  }
 }
 
 function Check({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
@@ -649,15 +647,13 @@ html, body { margin: 0; padding: 0; background: var(--bg-base); color: var(--tex
 .sample-msg { padding: 4px 0; }
 .sample-msg.anim { animation: sampleIn .35s ease-out both; }
 @keyframes sampleIn { from { opacity: 0; transform: translateX(-10px); } to { opacity: 1; transform: none; } }
-.sample-badge {
-  display: inline-flex; align-items: center; justify-content: center;
-  padding: 0 5px; height: 1.1em; line-height: 1.1em;
-  font-size: 0.62em; font-weight: 800;
-  border-radius: 4px; margin-right: 4px;
-  vertical-align: middle; text-transform: uppercase; letter-spacing: 0.04em;
-  color: #fff;
+.sample-badge-img {
+  display: inline-block;
+  width: 1.15em; height: 1.15em;
+  vertical-align: -0.18em;
+  margin-right: 4px;
+  border-radius: 3px;
   -webkit-text-stroke: 0;
-  text-shadow: none;
 }
 .sample-name { font-weight: 800; }
 .sample-colon { margin: 0 2px; }
