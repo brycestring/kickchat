@@ -167,8 +167,9 @@ export default function SettingsPage() {
 
       <header className="hero">
         <div className="hero-inner">
-          <KickLogo />
-          <h1 className="title glow-text">Chat Overlay</h1>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/kick-wordmark.png" alt="Kick" className="hero-wordmark" />
+          <h1 className="title glow-text">Chat Box</h1>
         </div>
       </header>
 
@@ -473,15 +474,19 @@ html, body { margin: 0; padding: 0; background: var(--bg-base); color: var(--tex
 
 /* ---- Hero ---- */
 .hero { padding: 40px 16px 24px; }
-.hero-inner { max-width: 600px; margin: 0 auto; display: flex; align-items: center; justify-content: center; gap: 16px; }
-.kick-logo { filter: drop-shadow(0 0 10px var(--primary-glow)) drop-shadow(0 0 20px var(--primary-glow)); animation: pulse 2s ease-in-out infinite; }
+.hero-inner { max-width: 600px; margin: 0 auto; display: flex; align-items: center; justify-content: center; gap: 12px; }
+.hero-wordmark {
+  height: 38px; width: auto;
+  filter: drop-shadow(0 0 10px var(--primary-glow)) drop-shadow(0 0 20px var(--primary-glow));
+  animation: pulse 2s ease-in-out infinite;
+}
 @keyframes pulse {
   0%,100% { filter: drop-shadow(0 0 10px var(--primary-glow)) drop-shadow(0 0 20px var(--primary-glow)); transform: scale(1); }
   50%     { filter: drop-shadow(0 0 15px var(--primary-glow)) drop-shadow(0 0 30px var(--primary-glow)); transform: scale(1.02); }
 }
 .title { margin: 0; font-size: 32px; font-weight: 800; letter-spacing: 0.05em; text-transform: uppercase; }
 .glow-text { text-shadow: 0 0 5px var(--primary-glow), 0 0 10px var(--primary-glow), 0 0 20px var(--primary-glow); }
-@media (min-width: 640px) { .title { font-size: 38px; } }
+@media (min-width: 640px) { .title { font-size: 38px; } .hero-wordmark { height: 44px; } }
 
 /* ---- Main ---- */
 .main { max-width: 600px; margin: 0 auto; padding: 0 16px; display: flex; flex-direction: column; gap: 20px; }
