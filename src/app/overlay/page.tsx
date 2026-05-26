@@ -187,6 +187,7 @@ export default function OverlayPage() {
         @keyframes kcIn { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: none; } }
         .kc-name { font-weight: 800; }
         .kc-emote { display: inline-block; height: 1.6em; vertical-align: middle; margin: -2px 1px; -webkit-text-stroke: 0; text-shadow: none; }
+        .kc-twemoji { display: inline-block; height: 1.1em; width: 1.1em; vertical-align: -0.15em; margin: 0 1px; -webkit-text-stroke: 0; text-shadow: none; }
         .kc-badge-img { display: inline-block; width: 1.15em; height: 1.15em; vertical-align: -0.18em; margin-right: 4px; border-radius: 3px; -webkit-text-stroke: 0; text-shadow: none; }
         ::-webkit-scrollbar { display: none; }
       `}</style>
