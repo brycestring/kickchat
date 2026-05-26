@@ -169,7 +169,7 @@ export default function SettingsPage() {
         <div className="hero-inner">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/kick-wordmark.png" alt="Kick" className="hero-wordmark" />
-          <h1 className="title glow-text">Chat Box</h1>
+          <h1 className="title">Chat Box</h1>
         </div>
       </header>
 
