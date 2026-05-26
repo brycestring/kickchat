@@ -102,8 +102,11 @@ export function renderKickMessageHTML(content: string): string {
       // emojis for color SVG <img> tags.
       const escaped = escapeHtml(parts[i])
       out += twemoji.parse(escaped, {
-        folder: 'svg',
-        ext: '.svg',
+        // PNG instead of SVG — OBS's bundled Chromium has been buggy
+        // rendering Twemoji SVGs at small sizes (outlines only / missing
+        // fills). 72x72 PNGs render as reliable rasters.
+        folder: '72x72',
+        ext: '.png',
         className: 'kc-twemoji',
       } as Parameters<typeof twemoji.parse>[1])
     } else if (i % 3 === 1) {

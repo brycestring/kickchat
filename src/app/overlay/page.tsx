@@ -214,9 +214,9 @@ export default function OverlayPage() {
         .kc-msg.anim { animation: kcIn .22s ease-out both; }
         @keyframes kcIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
         .kc-name { font-weight: 800; }
-        .kc-emote { display: inline-block; height: 1.6em; vertical-align: middle; margin: -2px 1px; -webkit-text-stroke: 0; text-shadow: none; }
-        .kc-twemoji { display: inline-block; height: 1.1em; width: 1.1em; vertical-align: -0.15em; margin: 0 1px; -webkit-text-stroke: 0; text-shadow: none; }
-        .kc-badge-img { display: inline-block; width: 1.15em; height: 1.15em; vertical-align: -0.18em; margin-right: 4px; border-radius: 3px; -webkit-text-stroke: 0; text-shadow: none; }
+        .kc-emote { display: inline-block; height: 1.6em; vertical-align: middle; margin: -2px 1px; -webkit-text-stroke: 0 !important; text-shadow: none !important; outline: none; border: 0; }
+        .kc-twemoji { display: inline-block; height: 1.15em; width: 1.15em; vertical-align: -0.18em; margin: 0 1px; -webkit-text-stroke: 0 !important; text-shadow: none !important; outline: none; border: 0; }
+        .kc-badge-img { display: inline-block; width: 1.15em; height: 1.15em; vertical-align: -0.18em; margin-right: 4px; border-radius: 3px; -webkit-text-stroke: 0 !important; text-shadow: none !important; outline: none; border: 0; }
         ::-webkit-scrollbar { display: none; }
       `}</style>
 
