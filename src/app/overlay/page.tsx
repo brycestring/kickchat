@@ -144,11 +144,35 @@ export default function OverlayPage() {
     return () => clearInterval(t)
   }, [fade, fadeSeconds])
 
+  // Pin the scroll to the bottom after layout actually settles. Double
+  // requestAnimationFrame so we wait for both React commit and the
+  // browser's next paint (otherwise the new message can flash partially
+  // visible at the bottom edge for a frame).
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
-    el.scrollTop = el.scrollHeight
+    const pin = () => { el.scrollTop = el.scrollHeight }
+    const id1 = requestAnimationFrame(() => {
+      pin()
+      const id2 = requestAnimationFrame(pin)
+      ;(el as HTMLDivElement & { _pinRaf?: number })._pinRaf = id2
+    })
+    return () => cancelAnimationFrame(id1)
   }, [messages])
+
+  // Re-pin scroll once any emote/twemoji image inside the latest message
+  // finishes loading — those change line-height after the initial render
+  // and would otherwise leave the message clipped at the bottom.
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const handler = (e: Event) => {
+      const t = e.target as HTMLElement
+      if (t?.tagName === 'IMG') el.scrollTop = el.scrollHeight
+    }
+    el.addEventListener('load', handler, true)
+    return () => el.removeEventListener('load', handler, true)
+  }, [])
 
   function resolveBadgeSrc(type: string, count?: number): string | null {
     if (type === 'subscriber') {
@@ -179,12 +203,16 @@ export default function OverlayPage() {
         WebkitTextStroke: strokeWidth ? `${strokeWidth}px #000` : undefined,
         textShadow,
         scrollbarWidth: 'none',
+        // Stop the browser from "anchoring" scroll position when older
+        // messages are sliced off — without this, the layout jumps and
+        // a new bottom message can flash mid-scroll.
+        overflowAnchor: 'none',
       }}
     >
       <style>{`
         .kc-msg { padding: 4px 0; }
-        .kc-msg.anim { animation: kcIn .25s ease-out; }
-        @keyframes kcIn { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: none; } }
+        .kc-msg.anim { animation: kcIn .22s ease-out both; }
+        @keyframes kcIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
         .kc-name { font-weight: 800; }
         .kc-emote { display: inline-block; height: 1.6em; vertical-align: middle; margin: -2px 1px; -webkit-text-stroke: 0; text-shadow: none; }
         .kc-twemoji { display: inline-block; height: 1.1em; width: 1.1em; vertical-align: -0.15em; margin: 0 1px; -webkit-text-stroke: 0; text-shadow: none; }
