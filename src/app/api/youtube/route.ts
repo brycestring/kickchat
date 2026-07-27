@@ -1,22 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { escapeHtml, twemojify, localBadgeSrc } from '@/lib/chat'
 
-// Server-side YouTube live-chat scraper (no API key). YouTube's internal
-// endpoints are CORS-blocked in the browser, so the overlay polls this route
-// and we hold the per-channel continuation token in memory here.
-//
-// Flow: resolve the channel's current live video → load its /live_chat page to
-// grab the INNERTUBE api key + initial continuation → poll get_live_chat,
-// advancing the continuation each call and returning the new messages.
+// Server-side YouTube live-chat connector. Two modes:
+//   - API mode (preferred, reliable): when YOUTUBE_API_KEY is set. We resolve
+//     the live video id by scraping the channel's /live page (cheap + free),
+//     then use the Data API videos.list → activeLiveChatId → liveChatMessages
+//     .list to poll — official + not throttled.
+//   - Scrape mode (fallback, no key): scrape the live_chat page + poll
+//     get_live_chat. Works but YouTube rate-limits datacenter IPs.
+// Either way the browser can't do this (CORS), so the overlay polls this route.
 
 export const dynamic = 'force-dynamic'
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
-
-type Session = { key: string; clientVersion: string; continuation: string; videoId: string; updatedAt: number; pending: OutMsg[] }
-const sessions = new Map<string, Session>()
+const apiKey = () => process.env.YOUTUBE_API_KEY || ''
 
 type OutMsg = { id: string; username: string; color: string; html: string; badges: string[] }
+type ScrapeSession = { mode: 'scrape'; key: string; clientVersion: string; continuation: string; videoId: string; updatedAt: number; pending: OutMsg[] }
+type ApiSession = { mode: 'api'; liveChatId: string; pageToken?: string; videoId: string; updatedAt: number }
+type Session = ScrapeSession | ApiSession
+const sessions = new Map<string, Session>()
 
 // Parse a YouTube live-chat action array (same item shape whether it comes
 // from the page's initial ytInitialData or a get_live_chat poll response).
@@ -95,14 +98,15 @@ function deepFindContinuation(obj: unknown): string | null {
   return found
 }
 
-async function bootstrap(channel: string): Promise<Session | { notLive: true } | null> {
+// Resolve the channel's current live video id by scraping its /live page.
+// Cheap + reliable (only chat POLLING is throttled, not this).
+async function resolveVideoId(channel: string): Promise<string | null> {
   const liveHtml = await fetchText(channelLiveUrl(channel))
   if (!liveHtml) return null
-  const vid = liveHtml.match(/"videoId":"([\w-]{11})"/)
-  if (!vid) return { notLive: true }
-  // A channel with no active stream still resolves, but the watch page won't
-  // be "live" — the live_chat page below simply won't yield a continuation.
-  const videoId = vid[1]
+  return liveHtml.match(/"videoId":"([\w-]{11})"/)?.[1] ?? null
+}
+
+async function bootstrapScrape(channel: string, videoId: string): Promise<ScrapeSession | { notLive: true }> {
   const chatHtml = await fetchText(`https://www.youtube.com/live_chat?is_popout=1&v=${videoId}`)
   if (!chatHtml) return { notLive: true }
   const key = chatHtml.match(/"INNERTUBE_API_KEY":"([^"]+)"/)?.[1]
@@ -115,9 +119,39 @@ async function bootstrap(channel: string): Promise<Session | { notLive: true } |
   // shows live chat immediately (also covers cases where the delta poll is
   // rate-limited by YouTube for datacenter IPs).
   const pageActions = (initial as { contents?: { liveChatRenderer?: { actions?: unknown[] } } })?.contents?.liveChatRenderer?.actions ?? []
-  const s: Session = { key, clientVersion, continuation, videoId, updatedAt: Date.now(), pending: messagesFromActions(pageActions).slice(-30) }
-  sessions.set(channel, s)
-  return s
+  return { mode: 'scrape', key, clientVersion, continuation, videoId, updatedAt: Date.now(), pending: messagesFromActions(pageActions).slice(-30) }
+}
+
+// ── Data API mode ──────────────────────────────────────────────────────────
+async function getLiveChatId(videoId: string, key: string): Promise<string | null> {
+  try {
+    const r = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=liveStreamingDetails&id=${videoId}&key=${key}`)
+    if (!r.ok) return null
+    const j = await r.json()
+    return j?.items?.[0]?.liveStreamingDetails?.activeLiveChatId ?? null
+  } catch { return null }
+}
+
+type ApiItem = {
+  id?: string
+  snippet?: { type?: string; displayMessage?: string }
+  authorDetails?: { displayName?: string; isChatOwner?: boolean; isChatModerator?: boolean; isChatSponsor?: boolean; isVerified?: boolean }
+}
+function messagesFromApiItems(items: ApiItem[]): OutMsg[] {
+  const out: OutMsg[] = []
+  for (const it of items) {
+    const type = it.snippet?.type
+    if (type !== 'textMessageEvent' && type !== 'superChatEvent') continue
+    const text = it.snippet?.displayMessage ?? ''
+    const a = it.authorDetails ?? {}
+    const badges: string[] = []
+    const roleKeys: string[] = []
+    if (a.isChatOwner) { const s = localBadgeSrc('owner'); if (s) badges.push(s); roleKeys.push('broadcaster') }
+    if (a.isChatModerator) { const s = localBadgeSrc('moderator'); if (s) badges.push(s); roleKeys.push('moderator') }
+    if (a.isVerified) { const s = localBadgeSrc('verified'); if (s) badges.push(s) }
+    if (it.id && a.displayName) out.push({ id: it.id, username: a.displayName, color: ytColor(roleKeys), html: twemojify(escapeHtml(text)), badges })
+  }
+  return out
 }
 
 function renderRuns(runs: unknown): string {
@@ -159,22 +193,52 @@ function parseActions(json: unknown): { messages: OutMsg[]; continuation: string
 export async function GET(req: NextRequest) {
   const channel = req.nextUrl.searchParams.get('channel')?.trim()
   if (!channel) return NextResponse.json({ error: 'channel required' }, { status: 400 })
+  const key = apiKey()
 
   let s = sessions.get(channel)
   if (!s) {
-    const boot = await bootstrap(channel)
-    if (!boot) return NextResponse.json({ live: false, error: 'fetch_failed' })
-    if ('notLive' in boot) return NextResponse.json({ live: false })
-    s = boot
+    const videoId = await resolveVideoId(channel)
+    if (videoId === null) return NextResponse.json({ live: false, error: 'fetch_failed' })
+    if (!videoId) return NextResponse.json({ live: false })
+    if (key) {
+      const liveChatId = await getLiveChatId(videoId, key)
+      if (!liveChatId) return NextResponse.json({ live: false })
+      s = { mode: 'api', liveChatId, videoId, updatedAt: Date.now() }
+    } else {
+      const boot = await bootstrapScrape(channel, videoId)
+      if ('notLive' in boot) return NextResponse.json({ live: false })
+      s = boot
+    }
+    sessions.set(channel, s)
   }
 
-  // Flush the initial snapshot captured at bootstrap before delta-polling.
+  // ── API mode ──
+  if (s.mode === 'api') {
+    try {
+      const u = new URL('https://www.googleapis.com/youtube/v3/liveChatMessages')
+      u.searchParams.set('part', 'snippet,authorDetails')
+      u.searchParams.set('liveChatId', s.liveChatId)
+      u.searchParams.set('key', key)
+      if (s.pageToken) u.searchParams.set('pageToken', s.pageToken)
+      const r = await fetch(u)
+      if (!r.ok) { sessions.delete(channel); return NextResponse.json({ live: false, error: `api_${r.status}` }) }
+      const j = await r.json()
+      s.pageToken = j.nextPageToken
+      s.updatedAt = Date.now()
+      const messages = messagesFromApiItems((j.items ?? []) as ApiItem[])
+      return NextResponse.json({ live: true, messages, pollMs: Math.max(1500, Math.min(8000, Number(j.pollingIntervalMillis) || 3000)) })
+    } catch (e) {
+      sessions.delete(channel)
+      return NextResponse.json({ live: false, error: e instanceof Error ? e.message : 'api_error' })
+    }
+  }
+
+  // ── Scrape mode ──
   if (s.pending.length) {
     const messages = s.pending
     s.pending = []
     return NextResponse.json({ live: true, messages, pollMs: 2000 })
   }
-
   try {
     const r = await fetch(`https://www.youtube.com/youtubei/v1/live_chat/get_live_chat?key=${s.key}&prettyPrint=false`, {
       method: 'POST',
@@ -185,7 +249,7 @@ export async function GET(req: NextRequest) {
     const json = await r.json()
     const { messages, continuation, timeoutMs } = parseActions(json)
     if (continuation) { s.continuation = continuation; s.updatedAt = Date.now() }
-    else sessions.delete(channel) // stream likely ended; re-bootstrap next call
+    else sessions.delete(channel)
     return NextResponse.json({ live: true, messages, pollMs: Math.max(1200, Math.min(5000, timeoutMs)) })
   } catch (e) {
     sessions.delete(channel)
