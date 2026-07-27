@@ -319,7 +319,9 @@ export default function SettingsPage() {
   )
 }
 
+type Plat = 'kick' | 'twitch' | 'youtube'
 interface SampleMsg {
+  platform: Plat
   badges: string[]
   username: string
   color: string
@@ -327,18 +329,20 @@ interface SampleMsg {
   emote?: { id: string; name: string }
 }
 
+// A realistic mix — all three platforms chatting at once.
 const SAMPLES: SampleMsg[] = [
-  { badges: ['broadcaster'], username: 'streamer', color: '#53fc18', text: 'welcome to the stream 🎮' },
-  { badges: ['moderator'], username: 'mod_alex', color: '#0e8c4a', text: 'rules in the description!' },
-  { badges: ['verified', 'og'], username: 'CoolViewer42', color: '#1e90ff', text: 'this clip was insane' },
-  { badges: ['vip'], username: 'KickFan', color: '#ff66c4', text: 'LETSGO', emote: { id: '37226', name: 'KEKW' } },
-  { badges: [], username: 'newchatter', color: '#ffa94d', text: 'first time here, looks fun' },
-  { badges: ['founder'], username: 'BigGreen', color: '#ffd93d', text: 'kekw kekw kekw' },
-  { badges: [], username: 'lurker99', color: '#a78bfa', text: 'pog' },
-  { badges: ['moderator', 'sub_gifter'], username: 'mod_alex', color: '#0e8c4a', text: 'no spoilers!' },
-  { badges: ['verified'], username: 'gamer_ts', color: '#22d3ee', text: 'GG WP that was insane' },
-  { badges: ['vip', 'sub_gifter'], username: 'TwitchRefugee', color: '#f97316', text: 'kick chat hits different' },
-  { badges: ['staff'], username: 'KickStaff', color: '#9333ea', text: 'enjoy the stream everyone' },
+  { platform: 'kick', badges: ['broadcaster'], username: 'streamer', color: '#53fc18', text: 'welcome to the stream 🎮' },
+  { platform: 'twitch', badges: ['moderator'], username: 'Mod_Alex', color: '#00c8af', text: 'rules are in the panels below!' },
+  { platform: 'youtube', badges: [], username: 'YT_Viewer', color: '#cfcfcf', text: 'first time catching you live 🔥' },
+  { platform: 'kick', badges: ['vip'], username: 'KickFan', color: '#ff66c4', text: 'LETSGO', emote: { id: '37226', name: 'KEKW' } },
+  { platform: 'twitch', badges: ['vip'], username: 'PogChampion', color: '#ff4a80', text: 'that play was actually insane' },
+  { platform: 'youtube', badges: ['moderator'], username: 'ModMari', color: '#5f84f1', text: 'keep chat friendly everyone 💜' },
+  { platform: 'kick', badges: ['founder'], username: 'BigGreen', color: '#ffd93d', text: 'kekw kekw kekw' },
+  { platform: 'twitch', badges: ['verified'], username: 'gamer_ts', color: '#1e90ff', text: 'GG WP 👏' },
+  { platform: 'youtube', badges: ['broadcaster'], username: 'The Creator', color: '#ffd93d', text: 'thanks for pulling up ❤️' },
+  { platform: 'kick', badges: [], username: 'lurker99', color: '#a78bfa', text: 'pog' },
+  { platform: 'twitch', badges: [], username: 'newchatter', color: '#ffa94d', text: 'multi-stream chat is clean' },
+  { platform: 'youtube', badges: [], username: 'SuperFan22', color: '#22d3ee', text: 'all three platforms in one 😮' },
 ]
 
 const MAX_VISIBLE = 6
@@ -403,6 +407,10 @@ function SamplePreview({ s }: { s: Settings }) {
       >
         {msgs.map(m => (
           <div key={m.uid} className={`sample-msg ${s.animate ? 'anim' : ''}`}>
+            {s.platform && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img className="sample-plat" src={`/platforms/${m.platform}.png`} alt={m.platform} />
+            )}
             {s.badges && m.badges.map((type, j) => (
               // eslint-disable-next-line @next/next/no-img-element
               <img
@@ -710,6 +718,13 @@ html, body { margin: 0; padding: 0; background: var(--bg-base); color: var(--tex
 .sample-msg { padding: 4px 0; }
 .sample-msg.anim { animation: sampleIn .35s ease-out both; }
 @keyframes sampleIn { from { opacity: 0; transform: translateX(-10px); } to { opacity: 1; transform: none; } }
+.sample-plat {
+  display: inline-block;
+  height: 1.05em; width: auto;
+  vertical-align: -0.16em;
+  margin-right: 5px;
+  -webkit-text-stroke: 0;
+}
 .sample-badge-img {
   display: inline-block;
   width: 1.15em; height: 1.15em;
