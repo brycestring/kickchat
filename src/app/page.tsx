@@ -412,7 +412,7 @@ function SamplePreview({ s }: { s: Settings }) {
           <div key={m.uid} className={`sample-msg ${s.animate ? 'anim' : ''}`}>
             {s.platform && (
               // eslint-disable-next-line @next/next/no-img-element
-              <img className="sample-plat" src={`/platforms/${m.platform}.png`} alt={m.platform} />
+              <img className={`sample-plat sample-plat-${m.platform}`} src={`/platforms/${m.platform}.png`} alt={m.platform} />
             )}
             {s.badges && m.badges.map((type, j) => (
               // eslint-disable-next-line @next/next/no-img-element
@@ -728,6 +728,7 @@ html, body { margin: 0; padding: 0; background: var(--bg-base); color: var(--tex
   margin-right: 5px;
   -webkit-text-stroke: 0;
 }
+.sample-plat-youtube { height: 0.86em; vertical-align: -0.08em; }
 .sample-badge-img {
   display: inline-block;
   width: 1.15em; height: 1.15em;

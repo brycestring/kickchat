@@ -210,6 +210,7 @@ export default function OverlayPage() {
         @keyframes kcIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
         .kc-name { font-weight: 800; }
         .kc-plat { display: inline-block; height: 1.05em; width: auto; vertical-align: -0.16em; margin-right: 5px; -webkit-text-stroke: 0 !important; text-shadow: none !important; outline: none; border: 0; }
+        .kc-plat-youtube { height: 0.86em; vertical-align: -0.08em; }
         .kc-emote { display: inline-block; height: 1.6em; vertical-align: middle; margin: -2px 1px; -webkit-text-stroke: 0 !important; text-shadow: none !important; outline: none; border: 0; }
         .kc-twemoji { display: inline-block; height: 1.15em; width: 1.15em; vertical-align: -0.18em; margin: 0 1px; -webkit-text-stroke: 0 !important; text-shadow: none !important; outline: none; border: 0; }
         .kc-badge-img { display: inline-block; width: 1.15em; height: 1.15em; vertical-align: -0.18em; margin-right: 4px; border-radius: 3px; -webkit-text-stroke: 0 !important; text-shadow: none !important; outline: none; border: 0; }
@@ -229,7 +230,7 @@ export default function OverlayPage() {
         <div key={m.id} className={`kc-msg ${animate ? 'anim' : ''}`}>
           {showPlatform && (
             // eslint-disable-next-line @next/next/no-img-element
-            <img className="kc-plat" src={`/platforms/${m.platform}.png`} alt={m.platform} title={m.platform} />
+            <img className={`kc-plat kc-plat-${m.platform}`} src={`/platforms/${m.platform}.png`} alt={m.platform} title={m.platform} />
           )}
           {m.badges.map((src, i) => (
             // eslint-disable-next-line @next/next/no-img-element
