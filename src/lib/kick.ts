@@ -79,42 +79,22 @@ export function connectKickChat(
   }
 }
 
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-import twemoji from '@twemoji/api'
+import { escapeHtml, type MsgPart } from '@/lib/chat'
 
-const escapeHtml = (s: string) =>
-  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
-
-// Render a Kick chat message to safe HTML:
-//   1. [emote:ID:name] tags → <img> from files.kick.com
-//   2. Unicode emojis (😂, 🔥, etc.) → Twemoji SVG <img> so they show in
-//      full color on every platform (OBS browser source, Windows, Linux —
-//      not just systems with Apple Color Emoji)
-//   3. Everything else gets HTML-escaped so plain text can't inject markup
-export function renderKickMessageHTML(content: string): string {
-  // Split on Kick emote tags so we can handle the text and emote pieces
-  // separately. Even indices = plain text, odd-grouped indices = emote.
-  const parts = content.split(/\[emote:(\d+):([^\]]+)\]/g)
-  let out = ''
-  for (let i = 0; i < parts.length; i++) {
+// Split a Kick message into parts: native [emote:ID:name] tags become image
+// parts (files.kick.com); surrounding text stays raw so the overlay can
+// resolve 7TV/BTTV word-emotes + unicode emoji against the channel emote map.
+export function kickParts(content: string): MsgPart[] {
+  const chunks = content.split(/\[emote:(\d+):([^\]]+)\]/g)
+  const out: MsgPart[] = []
+  for (let i = 0; i < chunks.length; i++) {
     if (i % 3 === 0) {
-      // Plain text chunk — escape, then run twemoji to swap unicode
-      // emojis for color SVG <img> tags.
-      const escaped = escapeHtml(parts[i])
-      out += twemoji.parse(escaped, {
-        // PNG instead of SVG — OBS's bundled Chromium has been buggy
-        // rendering Twemoji SVGs at small sizes (outlines only / missing
-        // fills). 72x72 PNGs render as reliable rasters.
-        folder: '72x72',
-        ext: '.png',
-        className: 'kc-twemoji',
-      } as Parameters<typeof twemoji.parse>[1])
+      if (chunks[i]) out.push({ t: 'text', v: chunks[i] })
     } else if (i % 3 === 1) {
-      // Emote id; the next part is the name.
-      const id = parts[i]
-      const name = escapeHtml(parts[i + 1] ?? '')
-      out += `<img class="kc-emote" src="https://files.kick.com/emotes/${id}/fullsize" alt="${name}" title="${name}" />`
-      i++ // skip the name part we already consumed
+      const id = chunks[i]
+      const name = escapeHtml(chunks[i + 1] ?? '')
+      out.push({ t: 'img', v: `<img class="kc-emote" src="https://files.kick.com/emotes/${id}/fullsize" alt="${name}" title="${name}" />` })
+      i++
     }
   }
   return out

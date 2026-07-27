@@ -35,7 +35,7 @@ export function connectYouTubeChat(
         onStatus?.('connected')
         for (const m of d.messages) {
           if (m?.id && remember(m.id)) {
-            onMessage({ id: m.id, platform: 'youtube', username: m.username || '', color: m.color || '#cfcfcf', html: m.html || '', badges: m.badges || [] })
+            onMessage({ id: m.id, platform: 'youtube', username: m.username || '', color: m.color || '#cfcfcf', parts: Array.isArray(m.parts) ? m.parts : [], badges: m.badges || [] })
           }
         }
         if (typeof d.pollMs === 'number') nextMs = d.pollMs

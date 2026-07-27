@@ -1,6 +1,6 @@
 // Browser-side Twitch chat via anonymous IRC-over-WebSocket. No auth needed to
 // READ chat: connect as an anonymous "justinfan" user with tags enabled.
-import { escapeHtml, twemojify, localBadgeSrc, type ChatMessage } from '@/lib/chat'
+import { localBadgeSrc, type ChatMessage, type MsgPart } from '@/lib/chat'
 
 type StatusFn = (status: 'connecting' | 'connected' | 'disconnected' | 'error', detail?: string) => void
 
@@ -19,10 +19,10 @@ function parseTags(raw: string): Record<string, string> {
   return out
 }
 
-// Render a Twitch message: replace emote ranges (from the emotes tag) with
-// CDN <img>s, twemoji the rest. Positions in the emotes tag are codepoint
-// indices, so we index the message as an array of codepoints.
-function renderTwitch(message: string, emotesTag: string | undefined): string {
+// Split a Twitch message into parts: native emotes (from the emotes tag) become
+// image parts; the text between stays raw for word-emote/emoji resolution.
+// Emote positions in the tag are codepoint indices.
+function twitchParts(message: string, emotesTag: string | undefined): MsgPart[] {
   const cps = Array.from(message)
   const ranges: { start: number; end: number; id: string }[] = []
   if (emotesTag) {
@@ -36,15 +36,15 @@ function renderTwitch(message: string, emotesTag: string | undefined): string {
     }
     ranges.sort((x, y) => x.start - y.start)
   }
-  let out = ''
+  const out: MsgPart[] = []
   let i = 0
   for (const r of ranges) {
-    if (r.start > i) out += twemojify(escapeHtml(cps.slice(i, r.start).join('')))
-    const name = escapeHtml(cps.slice(r.start, r.end + 1).join(''))
-    out += `<img class="kc-emote" src="https://static-cdn.jtvnw.net/emoticons/v2/${r.id}/default/dark/2.0" alt="${name}" title="${name}" />`
+    if (r.start > i) out.push({ t: 'text', v: cps.slice(i, r.start).join('') })
+    const name = cps.slice(r.start, r.end + 1).join('')
+    out.push({ t: 'img', v: `<img class="kc-emote" src="https://static-cdn.jtvnw.net/emoticons/v2/${r.id}/default/dark/2.0" alt="${name.replace(/"/g, '')}" title="${name.replace(/"/g, '')}" />` })
     i = r.end + 1
   }
-  if (i < cps.length) out += twemojify(escapeHtml(cps.slice(i).join('')))
+  if (i < cps.length) out.push({ t: 'text', v: cps.slice(i).join('') })
   return out
 }
 
@@ -63,11 +63,13 @@ export function connectTwitchChat(
   channel: string,
   onMessage: (msg: Omit<ChatMessage, '_ts'>) => void,
   onStatus?: StatusFn,
+  onRoomId?: (id: string) => void,
 ): () => void {
   const chan = channel.trim().toLowerCase().replace(/^#/, '')
   let ws: WebSocket | null = null
   let stopped = false
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  let roomIdSent = false
 
   function connect() {
     if (stopped) return
@@ -95,6 +97,8 @@ export function connectTwitchChat(
         }
         const prMatch = rest.match(/^:([^!]+)![^ ]+ PRIVMSG #[^ ]+ :([\s\S]*)$/)
         if (!prMatch) continue
+        // The channel's numeric Twitch id — used to fetch 7TV/BTTV/FFZ emotes.
+        if (!roomIdSent && tags['room-id']) { roomIdSent = true; onRoomId?.(tags['room-id']) }
         const nick = prMatch[1]
         let text = prMatch[2]
         // Strip Twitch /me ACTION wrapper (\x01ACTION ...\x01).
@@ -105,7 +109,7 @@ export function connectTwitchChat(
           platform: 'twitch',
           username: tags['display-name'] || nick,
           color: tags.color || '#bf94ff',
-          html: renderTwitch(text, tags.emotes),
+          parts: twitchParts(text, tags.emotes),
           badges: badgesFromTag(tags.badges),
         })
       }

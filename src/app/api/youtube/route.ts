@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { escapeHtml, twemojify, localBadgeSrc } from '@/lib/chat'
+import { localBadgeSrc, type MsgPart } from '@/lib/chat'
 
 // Server-side YouTube live-chat connector. Two modes:
 //   - API mode (preferred, reliable): when YOUTUBE_API_KEY is set. We resolve
@@ -15,7 +15,7 @@ export const dynamic = 'force-dynamic'
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
 const apiKey = () => process.env.YOUTUBE_API_KEY || ''
 
-type OutMsg = { id: string; username: string; color: string; html: string; badges: string[] }
+type OutMsg = { id: string; username: string; color: string; parts: MsgPart[]; badges: string[] }
 type ScrapeSession = { mode: 'scrape'; key: string; clientVersion: string; continuation: string; videoId: string; updatedAt: number; pending: OutMsg[] }
 type ApiSession = { mode: 'api'; liveChatId: string; pageToken?: string; videoId: string; updatedAt: number }
 type Session = ScrapeSession | ApiSession
@@ -42,7 +42,7 @@ function messagesFromActions(actions: unknown[]): OutMsg[] {
       if (src && !badges.includes(src)) badges.push(src)
     }
     const roleKeys = badges.map(s => s.includes('broadcaster') ? 'broadcaster' : s.includes('moderator') ? 'moderator' : '')
-    if (id && username) messages.push({ id, username, color: ytColor(roleKeys), html: renderRuns((r.message as { runs?: unknown })?.runs), badges })
+    if (id && username) messages.push({ id, username, color: ytColor(roleKeys), parts: runsToParts((r.message as { runs?: unknown })?.runs), badges })
   }
   return messages
 }
@@ -149,22 +149,21 @@ function messagesFromApiItems(items: ApiItem[]): OutMsg[] {
     if (a.isChatOwner) { const s = localBadgeSrc('owner'); if (s) badges.push(s); roleKeys.push('broadcaster') }
     if (a.isChatModerator) { const s = localBadgeSrc('moderator'); if (s) badges.push(s); roleKeys.push('moderator') }
     if (a.isVerified) { const s = localBadgeSrc('verified'); if (s) badges.push(s) }
-    if (it.id && a.displayName) out.push({ id: it.id, username: a.displayName, color: ytColor(roleKeys), html: twemojify(escapeHtml(text)), badges })
+    if (it.id && a.displayName) out.push({ id: it.id, username: a.displayName, color: ytColor(roleKeys), parts: [{ t: 'text', v: text }], badges })
   }
   return out
 }
 
-function renderRuns(runs: unknown): string {
-  if (!Array.isArray(runs)) return ''
-  let out = ''
+function runsToParts(runs: unknown): MsgPart[] {
+  if (!Array.isArray(runs)) return []
+  const out: MsgPart[] = []
   for (const run of runs as Array<Record<string, unknown>>) {
-    if (typeof run.text === 'string') out += twemojify(escapeHtml(run.text))
+    if (typeof run.text === 'string') out.push({ t: 'text', v: run.text })
     else if (run.emoji) {
       const emoji = run.emoji as { image?: { thumbnails?: { url: string }[] }; isCustomEmoji?: boolean; shortcuts?: string[] }
       const url = emoji.image?.thumbnails?.slice(-1)[0]?.url
-      const alt = escapeHtml(emoji.shortcuts?.[0] || '')
-      if (emoji.isCustomEmoji && url) out += `<img class="kc-emote" src="${url}" alt="${alt}" title="${alt}" />`
-      else if (url) out += `<img class="kc-twemoji" src="${url}" alt="${alt}" />`
+      const alt = (emoji.shortcuts?.[0] || '').replace(/"/g, '')
+      if (url) out.push({ t: 'img', v: `<img class="${emoji.isCustomEmoji ? 'kc-emote' : 'kc-twemoji'}" src="${url}" alt="${alt}" title="${alt}" />` })
     }
   }
   return out

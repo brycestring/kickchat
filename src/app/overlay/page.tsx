@@ -1,10 +1,11 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { connectKickChat, renderKickMessageHTML, type KickChatMessage } from '@/lib/kick'
+import { connectKickChat, kickParts, type KickChatMessage } from '@/lib/kick'
 import { connectTwitchChat } from '@/lib/twitch'
 import { connectYouTubeChat } from '@/lib/youtube'
-import type { ChatMessage } from '@/lib/chat'
+import { renderParts, partsText, type ChatMessage } from '@/lib/chat'
+import { buildEmoteMap } from '@/lib/emotes'
 
 // Sized for OBS Browser Source default of 800x600.
 const FONT_SIZES: Record<string, number> = { small: 20, medium: 26, large: 34, xlarge: 42 }
@@ -44,6 +45,8 @@ export default function OverlayPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [anyConnected, setAnyConnected] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [, setEmoteVersion] = useState(0) // bump to re-render once emotes load
+  const emoteMap = useRef<Map<string, string>>(new Map())
   const containerRef = useRef<HTMLDivElement>(null)
   const q = typeof window !== 'undefined' ? readQuery() : {}
 
@@ -51,9 +54,17 @@ export default function OverlayPage() {
   // badges). Old URLs used channel/cid; new ones use kick/kcid.
   const kickChannel = (q.kick || q.channel || '').toLowerCase()
   const kickCid = Number(q.kcid || q.cid) || 0
+  const kickUid = q.kuid || ''
   const twitchChannel = (q.twitch || '').toLowerCase()
   const ytChannel = q.yt || q.youtube || ''
   const subBadges = useRef<SubBadge[]>(decodeSubBadges(q.sb))
+
+  // Merge newly-fetched channel emotes into the map, then force a re-render so
+  // recent messages pick them up.
+  function addEmotes(m: Map<string, string>) {
+    for (const [k, v] of m) emoteMap.current.set(k, v)
+    setEmoteVersion(v => v + 1)
+  }
 
   const fontSize = FONT_SIZES[q.size || 'medium'] ?? 26
   const strokeWidth = STROKE_WIDTHS[q.stroke || 'off'] ?? 0
@@ -86,7 +97,7 @@ export default function OverlayPage() {
 
     const push = (m: Omit<ChatMessage, '_ts'>) => {
       const uname = (m.username || '').toLowerCase()
-      const text = m.html.replace(/<[^>]*>/g, '').trim()
+      const text = partsText(m.parts)
       if (hideCommands && text.startsWith('!')) return
       if (hideBots && BOT_USERS.has(uname)) return
       setMessages(prev => {
@@ -98,6 +109,11 @@ export default function OverlayPage() {
       if (s === 'connected') { if (!cancelled) setAnyConnected(true) }
     }
 
+    // ── Third-party emotes (7TV / BTTV / FFZ) ──
+    buildEmoteMap({}).then(m => { if (!cancelled) addEmotes(m) }) // 7TV global
+    if (kickUid) buildEmoteMap({ kickId: kickUid }).then(m => { if (!cancelled) addEmotes(m) })
+    if (/^UC[A-Za-z0-9_-]{20,}$/.test(ytChannel)) buildEmoteMap({ youtubeId: ytChannel }).then(m => { if (!cancelled) addEmotes(m) })
+
     async function startKick() {
       let cid = kickCid
       if (!cid && kickChannel) {
@@ -106,6 +122,8 @@ export default function OverlayPage() {
           if (r.ok) {
             const data = await r.json()
             cid = data?.chatroom?.id || 0
+            const uid = data?.user_id || data?.user?.id
+            if (uid) buildEmoteMap({ kickId: String(uid) }).then(m => { if (!cancelled) addEmotes(m) })
             type RawSubBadge = { months?: number; badge_image?: { src?: string } }
             subBadges.current = (data?.subscriber_badges ?? [])
               .map((b: RawSubBadge) => ({ m: b.months ?? 0, s: b.badge_image?.src ?? '' }))
@@ -124,7 +142,7 @@ export default function OverlayPage() {
           platform: 'kick',
           username: m.sender.username,
           color: m.sender.identity?.color || '#a3a3a3',
-          html: renderKickMessageHTML(m.content),
+          parts: kickParts(m.content),
           badges,
         })
       }, onStatus)
@@ -132,7 +150,12 @@ export default function OverlayPage() {
     }
 
     if (kickChannel || kickCid) startKick()
-    if (twitchChannel) stops.push(connectTwitchChat(twitchChannel, m => push({ ...m, badges: showBadges ? m.badges : [] }), onStatus))
+    if (twitchChannel) stops.push(connectTwitchChat(
+      twitchChannel,
+      m => push({ ...m, badges: showBadges ? m.badges : [] }),
+      onStatus,
+      roomId => buildEmoteMap({ twitchId: roomId }).then(m => { if (!cancelled) addEmotes(m) }),
+    ))
     if (ytChannel) stops.push(connectYouTubeChat(ytChannel, m => push({ ...m, badges: showBadges ? m.badges : [] }), onStatus))
 
     return () => { cancelled = true; for (const s of stops) s() }
@@ -214,7 +237,7 @@ export default function OverlayPage() {
           ))}
           <span className="kc-name" style={{ color: m.color }}>{m.username}</span>
           <span style={{ opacity: 0.7, margin: '0 4px' }}>:</span>
-          <span dangerouslySetInnerHTML={{ __html: m.html }} />
+          <span dangerouslySetInnerHTML={{ __html: renderParts(m.parts, emoteMap.current) }} />
         </div>
       ))}
     </div>

@@ -69,6 +69,7 @@ function buildQuery(s: Settings): URLSearchParams {
 interface ChannelInfo {
   chatroomId: number
   channelId: number
+  userId: number   // Kick user id (for 7TV emotes)
   displayName: string
   avatarUrl: string | null
   isLive: boolean
@@ -107,6 +108,7 @@ export default function SettingsPage() {
     const p = buildQuery(s)
     if (info) {
       p.set('kcid', String(info.chatroomId))
+      if (info.userId) p.set('kuid', String(info.userId))
       if (info.subBadges.length) {
         // Compact JSON → URL-safe base64 so OBS needn't hit Kick's API.
         const b64 = btoa(JSON.stringify(info.subBadges)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
@@ -152,6 +154,7 @@ export default function SettingsPage() {
         setInfo({
           chatroomId,
           channelId: data?.chatroom?.channel_id ?? data?.id ?? 0,
+          userId: data?.user_id ?? data?.user?.id ?? 0,
           displayName: data?.user?.username ?? u,
           avatarUrl: data?.user?.profile_pic ?? null,
           isLive: !!data?.livestream,
