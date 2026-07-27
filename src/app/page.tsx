@@ -200,17 +200,17 @@ export default function SettingsPage() {
               <div className="chan-rows">
                 <div className="chan-row">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img className="chan-ico" src="/platforms/kick.svg" alt="Kick" />
+                  <img className="chan-ico" src="/platforms/kick.png" alt="Kick" />
                   <input className="input" placeholder="Kick channel" value={s.channel} onChange={e => set('channel', e.target.value)} autoComplete="off" spellCheck={false} />
                 </div>
                 <div className="chan-row">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img className="chan-ico" src="/platforms/twitch.svg" alt="Twitch" />
+                  <img className="chan-ico" src="/platforms/twitch.png" alt="Twitch" />
                   <input className="input" placeholder="Twitch channel" value={s.twitch} onChange={e => set('twitch', e.target.value)} autoComplete="off" spellCheck={false} />
                 </div>
                 <div className="chan-row">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img className="chan-ico" src="/platforms/youtube.svg" alt="YouTube" />
+                  <img className="chan-ico" src="/platforms/youtube.png" alt="YouTube" />
                   <input className="input" placeholder="YouTube handle or channel ID" value={s.youtube} onChange={e => set('youtube', e.target.value)} autoComplete="off" spellCheck={false} />
                 </div>
               </div>
@@ -588,7 +588,7 @@ html, body { margin: 0; padding: 0; background: var(--bg-base); color: var(--tex
 
 .chan-rows { display: flex; flex-direction: column; gap: 10px; }
 .chan-row { display: flex; align-items: center; gap: 10px; }
-.chan-ico { width: 26px; height: 26px; flex-shrink: 0; border-radius: 6px; }
+.chan-ico { height: 22px; width: 30px; object-fit: contain; flex-shrink: 0; }
 .chan-row .input { text-align: left; letter-spacing: 0.02em; }
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
