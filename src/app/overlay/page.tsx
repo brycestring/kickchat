@@ -2,8 +2,9 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { connectKickChat, renderKickMessageHTML, type KickChatMessage } from '@/lib/kick'
-
-type Msg = KickChatMessage & { _ts: number }
+import { connectTwitchChat } from '@/lib/twitch'
+import { connectYouTubeChat } from '@/lib/youtube'
+import type { ChatMessage } from '@/lib/chat'
 
 // Sized for OBS Browser Source default of 800x600.
 const FONT_SIZES: Record<string, number> = { small: 20, medium: 26, large: 34, xlarge: 42 }
@@ -15,7 +16,7 @@ const SHADOWS: Record<string, string> = {
   heavy: '0 2px 4px rgba(0,0,0,1), 0 0 8px rgba(0,0,0,0.9), 0 0 14px rgba(0,0,0,0.7)',
 }
 const BOT_USERS = new Set(
-  ['nightbot', 'botisimo', 'streamelements', 'streamlabs', 'wizebot', 'fossabot', 'kickbot'].map(s => s.toLowerCase())
+  ['nightbot', 'botisimo', 'streamelements', 'streamlabs', 'wizebot', 'fossabot', 'kickbot', 'moobot', 'commanderroot'].map(s => s.toLowerCase())
 )
 const LOCAL_BADGES = new Set(['broadcaster', 'moderator', 'verified', 'vip', 'og', 'founder', 'sub_gifter', 'staff'])
 
@@ -31,8 +32,7 @@ function decodeSubBadges(b64: string | undefined): SubBadge[] {
   try {
     const std = b64.replace(/-/g, '+').replace(/_/g, '/')
     const pad = std.length % 4 === 0 ? '' : '='.repeat(4 - (std.length % 4))
-    const json = atob(std + pad)
-    const parsed = JSON.parse(json)
+    const parsed = JSON.parse(atob(std + pad))
     if (!Array.isArray(parsed)) return []
     return parsed
       .filter((b: { m?: unknown; s?: unknown }) => typeof b?.m === 'number' && typeof b?.s === 'string')
@@ -41,14 +41,18 @@ function decodeSubBadges(b64: string | undefined): SubBadge[] {
 }
 
 export default function OverlayPage() {
-  const [messages, setMessages] = useState<Msg[]>([])
-  const [status, setStatus] = useState<'init' | 'looking-up' | 'connecting' | 'connected' | 'error'>('init')
+  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [anyConnected, setAnyConnected] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const q = typeof window !== 'undefined' ? readQuery() : {}
 
-  const channel = q.channel?.toLowerCase() || ''
-  const chatroomIdFromUrl = Number(q.cid) || 0
+  // Kick can be given as a channel name or a pre-resolved chatroom id (+ sub
+  // badges). Old URLs used channel/cid; new ones use kick/kcid.
+  const kickChannel = (q.kick || q.channel || '').toLowerCase()
+  const kickCid = Number(q.kcid || q.cid) || 0
+  const twitchChannel = (q.twitch || '').toLowerCase()
+  const ytChannel = q.yt || q.youtube || ''
   const subBadges = useRef<SubBadge[]>(decodeSubBadges(q.sb))
 
   const fontSize = FONT_SIZES[q.size || 'medium'] ?? 26
@@ -56,84 +60,84 @@ export default function OverlayPage() {
   const textShadow = SHADOWS[q.shadow || 'off'] ?? 'none'
   const animate = q.animate !== '0'
   const showBadges = q.badges !== '0'
+  const showPlatform = q.pi !== '0'
   const hideCommands = q.commands === '1' || q.commands === 'hide'
   const hideBots = q.bots === '1' || q.bots === 'hide'
   const fade = q.fade === '1'
   const fadeSeconds = Math.max(2, Math.min(120, Number(q.delay) || 10))
   const maxMessages = Math.max(5, Math.min(200, Number(q.max) || 60))
 
+  function resolveKickBadge(type: string, count?: number): string | null {
+    if (type === 'subscriber') {
+      const m = count ?? 0
+      return subBadges.current.find(b => m >= b.m)?.s ?? null
+    }
+    if (LOCAL_BADGES.has(type)) return `/badges/${type}.svg`
+    return null
+  }
+
   useEffect(() => {
-    if (!chatroomIdFromUrl && !channel) {
-      setStatus('error')
-      setError('Missing channel or chatroom id in URL.')
+    if (!kickChannel && !kickCid && !twitchChannel && !ytChannel) {
+      setError('Add at least one channel (kick / twitch / youtube) to the URL.')
       return
     }
     let cancelled = false
-    let stop: (() => void) | null = null
+    const stops: Array<() => void> = []
 
-    async function start() {
-      let chatroomId = chatroomIdFromUrl
-
-      // Primary path: chatroom_id is already in the URL — no Kick API call needed.
-      // This is the path used when the overlay URL came from the settings page,
-      // which is critical for OBS where Kick blocks API access (no Cloudflare
-      // cookies in the OBS browser).
-      if (!chatroomId) {
-        setStatus('looking-up')
-        try {
-          const r = await fetch(`https://kick.com/api/v2/channels/${encodeURIComponent(channel)}`, {
-            headers: { 'Accept': 'application/json' },
-          })
-          if (!r.ok) {
-            if (!cancelled) {
-              setStatus('error')
-              setError(r.status === 404 ? 'Channel not found' : `Kick API ${r.status} — regenerate the overlay URL from the settings page`)
-            }
-            return
-          }
-          const data = await r.json()
-          if (!data?.chatroom?.id) {
-            if (!cancelled) { setStatus('error'); setError('No chatroom for channel') }
-            return
-          }
-          chatroomId = data.chatroom.id
-          type RawSubBadge = { months?: number; badge_image?: { src?: string } }
-          subBadges.current = (data?.subscriber_badges ?? [])
-            .map((b: RawSubBadge) => ({ m: b.months ?? 0, s: b.badge_image?.src ?? '' }))
-            .filter((b: SubBadge) => b.s)
-            .sort((a: SubBadge, b: SubBadge) => b.m - a.m)
-        } catch (err) {
-          if (!cancelled) {
-            setStatus('error')
-            setError(err instanceof Error ? err.message : 'Lookup failed')
-          }
-          return
-        }
-      }
-
-      if (cancelled) return
-      setStatus('connecting')
-      stop = connectKickChat(
-        chatroomId,
-        (m) => {
-          const text = (m.content ?? '').trim()
-          if (hideCommands && text.startsWith('!')) return
-          if (hideBots && BOT_USERS.has(m.sender.username.toLowerCase())) return
-          setMessages(prev => {
-            const next = [...prev, { ...m, _ts: Date.now() }]
-            return next.length > maxMessages ? next.slice(next.length - maxMessages) : next
-          })
-        },
-        (s) => {
-          if (s === 'connected') setStatus('connected')
-          else if (s === 'error') { setStatus('error'); setError('WebSocket error') }
-        }
-      )
+    const push = (m: Omit<ChatMessage, '_ts'>) => {
+      const uname = (m.username || '').toLowerCase()
+      const text = m.html.replace(/<[^>]*>/g, '').trim()
+      if (hideCommands && text.startsWith('!')) return
+      if (hideBots && BOT_USERS.has(uname)) return
+      setMessages(prev => {
+        const next = [...prev, { ...m, _ts: Date.now() }]
+        return next.length > maxMessages ? next.slice(next.length - maxMessages) : next
+      })
+    }
+    const onStatus = (s: string) => {
+      if (s === 'connected') { if (!cancelled) setAnyConnected(true) }
     }
 
-    start()
-    return () => { cancelled = true; if (stop) stop() }
-  }, [channel, chatroomIdFromUrl, maxMessages, hideCommands, hideBots])
+    async function startKick() {
+      let cid = kickCid
+      if (!cid && kickChannel) {
+        try {
+          const r = await fetch(`https://kick.com/api/v2/channels/${encodeURIComponent(kickChannel)}`, { headers: { Accept: 'application/json' } })
+          if (r.ok) {
+            const data = await r.json()
+            cid = data?.chatroom?.id || 0
+            type RawSubBadge = { months?: number; badge_image?: { src?: string } }
+            subBadges.current = (data?.subscriber_badges ?? [])
+              .map((b: RawSubBadge) => ({ m: b.months ?? 0, s: b.badge_image?.src ?? '' }))
+              .filter((b: SubBadge) => b.s)
+              .sort((a: SubBadge, b: SubBadge) => b.m - a.m)
+          }
+        } catch {}
+      }
+      if (cancelled || !cid) return
+      const stop = connectKickChat(cid, (m: KickChatMessage) => {
+        const badges = showBadges
+          ? (m.sender.identity?.badges ?? []).map(b => resolveKickBadge(b.type, b.count)).filter((s): s is string => !!s)
+          : []
+        push({
+          id: `k-${m.id}`,
+          platform: 'kick',
+          username: m.sender.username,
+          color: m.sender.identity?.color || '#a3a3a3',
+          html: renderKickMessageHTML(m.content),
+          badges,
+        })
+      }, onStatus)
+      stops.push(stop)
+    }
+
+    if (kickChannel || kickCid) startKick()
+    if (twitchChannel) stops.push(connectTwitchChat(twitchChannel, m => push({ ...m, badges: showBadges ? m.badges : [] }), onStatus))
+    if (ytChannel) stops.push(connectYouTubeChat(ytChannel, m => push({ ...m, badges: showBadges ? m.badges : [] }), onStatus))
+
+    return () => { cancelled = true; for (const s of stops) s() }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => {
     if (!fade) return
@@ -144,69 +148,37 @@ export default function OverlayPage() {
     return () => clearInterval(t)
   }, [fade, fadeSeconds])
 
-  // Pin the scroll to the bottom after layout actually settles. Double
-  // requestAnimationFrame so we wait for both React commit and the
-  // browser's next paint (otherwise the new message can flash partially
-  // visible at the bottom edge for a frame).
+  // Pin scroll to the bottom after layout settles (double rAF avoids a flash).
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
     const pin = () => { el.scrollTop = el.scrollHeight }
-    const id1 = requestAnimationFrame(() => {
-      pin()
-      const id2 = requestAnimationFrame(pin)
-      ;(el as HTMLDivElement & { _pinRaf?: number })._pinRaf = id2
-    })
+    const id1 = requestAnimationFrame(() => { pin(); requestAnimationFrame(pin) })
     return () => cancelAnimationFrame(id1)
   }, [messages])
 
-  // Re-pin scroll once any emote/twemoji image inside the latest message
-  // finishes loading — those change line-height after the initial render
-  // and would otherwise leave the message clipped at the bottom.
+  // Re-pin once emote/emoji images finish loading (they change line height).
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
-    const handler = (e: Event) => {
-      const t = e.target as HTMLElement
-      if (t?.tagName === 'IMG') el.scrollTop = el.scrollHeight
-    }
+    const handler = (e: Event) => { if ((e.target as HTMLElement)?.tagName === 'IMG') el.scrollTop = el.scrollHeight }
     el.addEventListener('load', handler, true)
     return () => el.removeEventListener('load', handler, true)
   }, [])
 
-  function resolveBadgeSrc(type: string, count?: number): string | null {
-    if (type === 'subscriber') {
-      const m = count ?? 0
-      const match = subBadges.current.find(b => m >= b.m)
-      return match?.s ?? null
-    }
-    if (LOCAL_BADGES.has(type)) return `/badges/${type}.svg`
-    return null
-  }
+  const platformsLabel = [kickChannel && 'Kick', twitchChannel && 'Twitch', ytChannel && 'YouTube'].filter(Boolean).join(' + ')
 
   return (
     <div
       ref={containerRef}
       style={{
-        position: 'fixed',
-        inset: 0,
-        padding: '12px',
-        overflowY: 'auto',
-        overflowX: 'hidden',
-        background: 'transparent',
-        color: '#ffffff',
+        position: 'fixed', inset: 0, padding: '12px',
+        overflowY: 'auto', overflowX: 'hidden',
+        background: 'transparent', color: '#ffffff',
         fontFamily: 'var(--font-open-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif',
-        fontWeight: 800,
-        fontSize: `${fontSize}px`,
-        lineHeight: 1.35,
-        wordWrap: 'break-word',
+        fontWeight: 800, fontSize: `${fontSize}px`, lineHeight: 1.35, wordWrap: 'break-word',
         WebkitTextStroke: strokeWidth ? `${strokeWidth}px #000` : undefined,
-        textShadow,
-        scrollbarWidth: 'none',
-        // Stop the browser from "anchoring" scroll position when older
-        // messages are sliced off — without this, the layout jumps and
-        // a new bottom message can flash mid-scroll.
-        overflowAnchor: 'none',
+        textShadow, scrollbarWidth: 'none', overflowAnchor: 'none',
       }}
     >
       <style>{`
@@ -214,45 +186,37 @@ export default function OverlayPage() {
         .kc-msg.anim { animation: kcIn .22s ease-out both; }
         @keyframes kcIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
         .kc-name { font-weight: 800; }
+        .kc-plat { display: inline-block; width: 1.15em; height: 1.15em; vertical-align: -0.18em; margin-right: 5px; border-radius: 4px; -webkit-text-stroke: 0 !important; text-shadow: none !important; outline: none; border: 0; }
         .kc-emote { display: inline-block; height: 1.6em; vertical-align: middle; margin: -2px 1px; -webkit-text-stroke: 0 !important; text-shadow: none !important; outline: none; border: 0; }
         .kc-twemoji { display: inline-block; height: 1.15em; width: 1.15em; vertical-align: -0.18em; margin: 0 1px; -webkit-text-stroke: 0 !important; text-shadow: none !important; outline: none; border: 0; }
         .kc-badge-img { display: inline-block; width: 1.15em; height: 1.15em; vertical-align: -0.18em; margin-right: 4px; border-radius: 3px; -webkit-text-stroke: 0 !important; text-shadow: none !important; outline: none; border: 0; }
         ::-webkit-scrollbar { display: none; }
       `}</style>
 
-      {status === 'error' && (
+      {error && (
         <div style={{ opacity: 0.7, fontSize: '13px', WebkitTextStroke: 0, textShadow: 'none' }}>⚠ {error}</div>
       )}
-      {status !== 'error' && status !== 'connected' && messages.length === 0 && (
+      {!error && !anyConnected && messages.length === 0 && (
         <div style={{ opacity: 0.4, fontSize: '13px', WebkitTextStroke: 0, textShadow: 'none' }}>
-          Connecting{channel ? ` to #${channel}` : ''}…
-        </div>
-      )}
-      {status === 'connected' && messages.length === 0 && (
-        <div style={{ opacity: 0.4, fontSize: '13px', WebkitTextStroke: 0, textShadow: 'none' }}>
-          Connected{channel ? ` to #${channel}` : ''} — waiting for messages…
+          Connecting{platformsLabel ? ` to ${platformsLabel}` : ''}…
         </div>
       )}
 
-      {messages.map(m => {
-        const userColor = m.sender.identity?.color || '#a3a3a3'
-        const badges = showBadges ? (m.sender.identity?.badges ?? []) : []
-        return (
-          <div key={m.id} className={`kc-msg ${animate ? 'anim' : ''}`}>
-            {badges.map((b, i) => {
-              const src = resolveBadgeSrc(b.type, b.count)
-              if (!src) return null
-              return (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img key={`${b.type}-${i}`} className="kc-badge-img" src={src} alt={b.type} title={b.text || b.type} />
-              )
-            })}
-            <span className="kc-name" style={{ color: userColor }}>{m.sender.username}</span>
-            <span style={{ opacity: 0.7, margin: '0 4px' }}>:</span>
-            <span dangerouslySetInnerHTML={{ __html: renderKickMessageHTML(m.content) }} />
-          </div>
-        )
-      })}
+      {messages.map(m => (
+        <div key={m.id} className={`kc-msg ${animate ? 'anim' : ''}`}>
+          {showPlatform && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img className="kc-plat" src={`/platforms/${m.platform}.svg`} alt={m.platform} title={m.platform} />
+          )}
+          {m.badges.map((src, i) => (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img key={i} className="kc-badge-img" src={src} alt="" />
+          ))}
+          <span className="kc-name" style={{ color: m.color }}>{m.username}</span>
+          <span style={{ opacity: 0.7, margin: '0 4px' }}>:</span>
+          <span dangerouslySetInnerHTML={{ __html: m.html }} />
+        </div>
+      ))}
     </div>
   )
 }

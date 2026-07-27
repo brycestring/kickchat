@@ -7,12 +7,15 @@ type Stroke = 'off' | 'thin' | 'medium' | 'thick' | 'thicker'
 type Shadow = 'off' | 'soft' | 'medium' | 'heavy'
 
 interface Settings {
-  channel: string
+  channel: string    // Kick
+  twitch: string
+  youtube: string
   size: Size
   stroke: Stroke
   shadow: Shadow
   animate: boolean
   badges: boolean
+  platform: boolean   // show platform badge
   commands: boolean   // hide commands
   bots: boolean       // hide bots
   fade: boolean
@@ -21,11 +24,14 @@ interface Settings {
 
 const DEFAULTS: Settings = {
   channel: '',
+  twitch: '',
+  youtube: '',
   size: 'medium',
   stroke: 'off',
   shadow: 'medium',
   animate: true,
   badges: true,
+  platform: true,
   commands: true,
   bots: true,
   fade: false,
@@ -42,21 +48,22 @@ export const SHADOW_CSS: Record<Shadow, string> = {
   heavy: '0 2px 4px rgba(0,0,0,1), 0 0 8px rgba(0,0,0,0.9), 0 0 14px rgba(0,0,0,0.7)',
 }
 
-function buildQuery(s: Settings): string {
+// Style params only — platform channels are added in the overlay URL builder.
+function buildQuery(s: Settings): URLSearchParams {
   const p = new URLSearchParams()
-  p.set('channel', s.channel.trim().toLowerCase())
   p.set('size', s.size)
   p.set('stroke', s.stroke)
   p.set('shadow', s.shadow)
   p.set('animate', s.animate ? '1' : '0')
   p.set('badges', s.badges ? '1' : '0')
+  p.set('pi', s.platform ? '1' : '0')
   p.set('commands', s.commands ? '1' : '0')
   p.set('bots', s.bots ? '1' : '0')
   if (s.fade) {
     p.set('fade', '1')
     p.set('delay', String(s.delay))
   }
-  return p.toString()
+  return p
 }
 
 interface ChannelInfo {
@@ -88,25 +95,29 @@ export default function SettingsPage() {
     try { localStorage.setItem('kc-settings', JSON.stringify(s)) } catch {}
   }, [s])
 
-  // Invalidate the cached channel info if the user changes the channel name.
+  // Invalidate on any channel change (need to re-generate).
   useEffect(() => {
     setInfo(null)
     setGenerated(false)
     setVerifyError(null)
-  }, [s.channel])
+  }, [s.channel, s.twitch, s.youtube])
 
   const overlayUrl = useMemo(() => {
-    if (!origin || !info) return ''
-    const p = new URLSearchParams(buildQuery(s))
-    p.set('cid', String(info.chatroomId))
-    if (info.subBadges.length) {
-      // Compact JSON, then base64 (URL-safe) so OBS doesn't need to hit Kick's API.
-      const json = JSON.stringify(info.subBadges)
-      const b64 = btoa(json).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
-      p.set('sb', b64)
+    if (!origin || !generated) return ''
+    const p = buildQuery(s)
+    if (info) {
+      p.set('kcid', String(info.chatroomId))
+      if (info.subBadges.length) {
+        // Compact JSON → URL-safe base64 so OBS needn't hit Kick's API.
+        const b64 = btoa(JSON.stringify(info.subBadges)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+        p.set('sb', b64)
+      }
     }
-    return `${origin}/overlay?${p.toString()}`
-  }, [origin, s, info])
+    if (s.twitch.trim()) p.set('twitch', s.twitch.trim().toLowerCase())
+    if (s.youtube.trim()) p.set('yt', s.youtube.trim().replace(/^@/, ''))
+    const hasAny = info || s.twitch.trim() || s.youtube.trim()
+    return hasAny ? `${origin}/overlay?${p.toString()}` : ''
+  }, [origin, s, info, generated])
 
   function set<K extends keyof Settings>(key: K, val: Settings[K]) {
     setS(prev => ({ ...prev, [key]: val }))
@@ -115,41 +126,43 @@ export default function SettingsPage() {
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
     const u = s.channel.trim().toLowerCase()
-    if (!u) return
+    const hasOther = !!(s.twitch.trim() || s.youtube.trim())
+    if (!u && !hasOther) return
     setInfo(null)
     setVerifyError(null)
     setGenerated(false)
-    try {
-      const r = await fetch(`https://kick.com/api/v2/channels/${encodeURIComponent(u)}`, {
-        headers: { 'Accept': 'application/json' },
-      })
-      if (!r.ok) {
-        setVerifyError(r.status === 404 ? 'Channel not found' : `Kick API ${r.status}`)
+
+    // Only Kick needs pre-resolution (chatroom id + sub badges, so OBS doesn't
+    // have to hit Kick's API). Twitch/YouTube just pass the channel through.
+    if (u) {
+      try {
+        const r = await fetch(`https://kick.com/api/v2/channels/${encodeURIComponent(u)}`, { headers: { Accept: 'application/json' } })
+        if (!r.ok) {
+          setVerifyError(r.status === 404 ? 'Kick channel not found' : `Kick API ${r.status}`)
+          return
+        }
+        const data = await r.json()
+        const chatroomId = data?.chatroom?.id
+        if (!chatroomId) { setVerifyError('No chatroom found for that Kick channel') ; return }
+        type RawSubBadge = { months?: number; badge_image?: { src?: string } }
+        const subs: { m: number; s: string }[] = (data?.subscriber_badges ?? [])
+          .map((b: RawSubBadge) => ({ m: b.months ?? 0, s: b.badge_image?.src ?? '' }))
+          .filter((b: { m: number; s: string }) => b.s)
+          .sort((a: { m: number }, b: { m: number }) => b.m - a.m)
+        setInfo({
+          chatroomId,
+          channelId: data?.chatroom?.channel_id ?? data?.id ?? 0,
+          displayName: data?.user?.username ?? u,
+          avatarUrl: data?.user?.profile_pic ?? null,
+          isLive: !!data?.livestream,
+          subBadges: subs,
+        })
+      } catch (err) {
+        setVerifyError(err instanceof Error ? err.message : 'Kick lookup failed')
         return
       }
-      const data = await r.json()
-      const chatroomId = data?.chatroom?.id
-      if (!chatroomId) {
-        setVerifyError('No chatroom found for channel')
-        return
-      }
-      type RawSubBadge = { months?: number; badge_image?: { src?: string } }
-      const subs: { m: number; s: string }[] = (data?.subscriber_badges ?? [])
-        .map((b: RawSubBadge) => ({ m: b.months ?? 0, s: b.badge_image?.src ?? '' }))
-        .filter((b: { m: number; s: string }) => b.s)
-        .sort((a: { m: number }, b: { m: number }) => b.m - a.m)
-      setInfo({
-        chatroomId,
-        channelId: data?.chatroom?.channel_id ?? data?.id ?? 0,
-        displayName: data?.user?.username ?? u,
-        avatarUrl: data?.user?.profile_pic ?? null,
-        isLive: !!data?.livestream,
-        subBadges: subs,
-      })
-      setGenerated(true)
-    } catch (err) {
-      setVerifyError(err instanceof Error ? err.message : 'Lookup failed')
     }
+    setGenerated(true)
   }
 
   async function copyUrl() {
@@ -183,16 +196,24 @@ export default function SettingsPage() {
 
           <form className="card-body" onSubmit={onSubmit}>
             <div>
-              <label className="section-label" htmlFor="channel">Kick Channel</label>
-              <input
-                id="channel"
-                className="input center"
-                placeholder="kick channel name"
-                value={s.channel}
-                onChange={e => set('channel', e.target.value)}
-                autoComplete="off"
-                spellCheck={false}
-              />
+              <label className="section-label">Channels <span style={{ textTransform: 'none', letterSpacing: 0, color: 'var(--text-muted)' }}>— fill in any (blank = skip)</span></label>
+              <div className="chan-rows">
+                <div className="chan-row">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img className="chan-ico" src="/platforms/kick.svg" alt="Kick" />
+                  <input className="input" placeholder="Kick channel" value={s.channel} onChange={e => set('channel', e.target.value)} autoComplete="off" spellCheck={false} />
+                </div>
+                <div className="chan-row">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img className="chan-ico" src="/platforms/twitch.svg" alt="Twitch" />
+                  <input className="input" placeholder="Twitch channel" value={s.twitch} onChange={e => set('twitch', e.target.value)} autoComplete="off" spellCheck={false} />
+                </div>
+                <div className="chan-row">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img className="chan-ico" src="/platforms/youtube.svg" alt="YouTube" />
+                  <input className="input" placeholder="YouTube handle or channel ID" value={s.youtube} onChange={e => set('youtube', e.target.value)} autoComplete="off" spellCheck={false} />
+                </div>
+              </div>
             </div>
 
             <div className="grid-3">
@@ -229,6 +250,7 @@ export default function SettingsPage() {
             <div className="grid-2 toggles">
               <Check label="Animate" checked={s.animate} onChange={v => set('animate', v)} />
               <Check label="Badges" checked={s.badges} onChange={v => set('badges', v)} />
+              <Check label="Platform Badge" checked={s.platform} onChange={v => set('platform', v)} />
               <Check label="Hide Commands" checked={s.commands} onChange={v => set('commands', v)} />
               <Check label="Hide Bots" checked={s.bots} onChange={v => set('bots', v)} />
             </div>
@@ -248,14 +270,14 @@ export default function SettingsPage() {
             </div>
 
             {verifyError && <div className="error">⚠ {verifyError}</div>}
-            {info && generated && (
+            {generated && (
               <div className="success">
-                {info.avatarUrl && <img src={info.avatarUrl} alt="" />}
-                Found <b>{info.displayName}</b>{info.isLive ? ' — live now' : ''}
+                {info?.avatarUrl && <img src={info.avatarUrl} alt="" />}
+                {[info && `Kick: ${info.displayName}${info.isLive ? ' (live)' : ''}`, s.twitch.trim() && `Twitch: ${s.twitch.trim()}`, s.youtube.trim() && `YouTube: ${s.youtube.trim()}`].filter(Boolean).join('  ·  ')}
               </div>
             )}
 
-            <button type="submit" className="btn-generate" disabled={!s.channel.trim()}>
+            <button type="submit" className="btn-generate" disabled={!s.channel.trim() && !s.twitch.trim() && !s.youtube.trim()}>
               Generate URL
             </button>
           </form>
@@ -564,6 +586,10 @@ html, body { margin: 0; padding: 0; background: var(--bg-base); color: var(--tex
   padding-right: 36px;
 }
 
+.chan-rows { display: flex; flex-direction: column; gap: 10px; }
+.chan-row { display: flex; align-items: center; gap: 10px; }
+.chan-ico { width: 26px; height: 26px; flex-shrink: 0; border-radius: 6px; }
+.chan-row .input { text-align: left; letter-spacing: 0.02em; }
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
 @media (max-width: 520px) { .grid-3 { grid-template-columns: 1fr 1fr; } }

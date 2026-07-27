@@ -1,0 +1,194 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { escapeHtml, twemojify, localBadgeSrc } from '@/lib/chat'
+
+// Server-side YouTube live-chat scraper (no API key). YouTube's internal
+// endpoints are CORS-blocked in the browser, so the overlay polls this route
+// and we hold the per-channel continuation token in memory here.
+//
+// Flow: resolve the channel's current live video → load its /live_chat page to
+// grab the INNERTUBE api key + initial continuation → poll get_live_chat,
+// advancing the continuation each call and returning the new messages.
+
+export const dynamic = 'force-dynamic'
+
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+
+type Session = { key: string; clientVersion: string; continuation: string; videoId: string; updatedAt: number; pending: OutMsg[] }
+const sessions = new Map<string, Session>()
+
+type OutMsg = { id: string; username: string; color: string; html: string; badges: string[] }
+
+// Parse a YouTube live-chat action array (same item shape whether it comes
+// from the page's initial ytInitialData or a get_live_chat poll response).
+function messagesFromActions(actions: unknown[]): OutMsg[] {
+  const messages: OutMsg[] = []
+  for (const a of actions) {
+    const item = (a as { addChatItemAction?: { item?: Record<string, unknown> } })?.addChatItemAction?.item
+    const r = item?.liveChatTextMessageRenderer as Record<string, unknown> | undefined
+    if (!r) continue
+    const id = String(r.id ?? '')
+    const username = ((r.authorName as { simpleText?: string })?.simpleText) ?? ''
+    const badges: string[] = []
+    for (const b of (r.authorBadges as unknown[]) ?? []) {
+      const bd = ((b as { liveChatAuthorBadgeRenderer?: { tooltip?: string; icon?: { iconType?: string } } })?.liveChatAuthorBadgeRenderer)
+      const role = (bd?.icon?.iconType || bd?.tooltip || '').toLowerCase()
+      const src = role.includes('owner') ? localBadgeSrc('owner')
+        : role.includes('moderator') ? localBadgeSrc('moderator')
+        : role.includes('verified') ? localBadgeSrc('verified')
+        : null
+      if (src && !badges.includes(src)) badges.push(src)
+    }
+    const roleKeys = badges.map(s => s.includes('broadcaster') ? 'broadcaster' : s.includes('moderator') ? 'moderator' : '')
+    if (id && username) messages.push({ id, username, color: ytColor(roleKeys), html: renderRuns((r.message as { runs?: unknown })?.runs), badges })
+  }
+  return messages
+}
+
+function channelLiveUrl(channel: string): string {
+  const c = channel.trim().replace(/^@/, '')
+  if (/^UC[A-Za-z0-9_-]{20,}$/.test(c)) return `https://www.youtube.com/channel/${c}/live`
+  return `https://www.youtube.com/@${encodeURIComponent(c)}/live`
+}
+
+async function fetchText(url: string): Promise<string | null> {
+  try {
+    const r = await fetch(url, { headers: { 'User-Agent': UA, 'Accept-Language': 'en-US,en;q=0.9' } })
+    if (!r.ok) return null
+    return await r.text()
+  } catch { return null }
+}
+
+// Pull the first balanced JSON object that follows a marker like
+// `ytInitialData = ` out of a page's HTML.
+function extractJsonAfter(html: string, marker: RegExp): unknown | null {
+  const m = html.match(marker)
+  if (!m) return null
+  const start = html.indexOf('{', m.index! + m[0].length - 1)
+  if (start === -1) return null
+  let depth = 0, inStr = false, esc = false
+  for (let i = start; i < html.length; i++) {
+    const ch = html[i]
+    if (inStr) {
+      if (esc) esc = false
+      else if (ch === '\\') esc = true
+      else if (ch === '"') inStr = false
+    } else if (ch === '"') inStr = true
+    else if (ch === '{') depth++
+    else if (ch === '}') { depth--; if (depth === 0) { try { return JSON.parse(html.slice(start, i + 1)) } catch { return null } } }
+  }
+  return null
+}
+
+function deepFindContinuation(obj: unknown): string | null {
+  // Find the first continuation token inside a liveChatContinuation-style tree.
+  let found: string | null = null
+  const walk = (o: unknown) => {
+    if (found || !o || typeof o !== 'object') return
+    const rec = o as Record<string, unknown>
+    for (const k of ['invalidationContinuationData', 'timedContinuationData', 'reloadContinuationData']) {
+      const c = rec[k] as { continuation?: string } | undefined
+      if (c?.continuation) { found = c.continuation; return }
+    }
+    for (const v of Object.values(rec)) walk(v)
+  }
+  walk(obj)
+  return found
+}
+
+async function bootstrap(channel: string): Promise<Session | { notLive: true } | null> {
+  const liveHtml = await fetchText(channelLiveUrl(channel))
+  if (!liveHtml) return null
+  const vid = liveHtml.match(/"videoId":"([\w-]{11})"/)
+  if (!vid) return { notLive: true }
+  // A channel with no active stream still resolves, but the watch page won't
+  // be "live" — the live_chat page below simply won't yield a continuation.
+  const videoId = vid[1]
+  const chatHtml = await fetchText(`https://www.youtube.com/live_chat?is_popout=1&v=${videoId}`)
+  if (!chatHtml) return { notLive: true }
+  const key = chatHtml.match(/"INNERTUBE_API_KEY":"([^"]+)"/)?.[1]
+  const clientVersion = chatHtml.match(/"INNERTUBE_CONTEXT_CLIENT_VERSION":"([^"]+)"/)?.[1]
+    || chatHtml.match(/"clientVersion":"([\d.]+)"/)?.[1]
+  const initial = extractJsonAfter(chatHtml, /window\["ytInitialData"\]\s*=\s*/) || extractJsonAfter(chatHtml, /ytInitialData\s*=\s*/)
+  const continuation = deepFindContinuation(initial)
+  if (!key || !clientVersion || !continuation) return { notLive: true }
+  // Seed with the recent messages already embedded in the page so the overlay
+  // shows live chat immediately (also covers cases where the delta poll is
+  // rate-limited by YouTube for datacenter IPs).
+  const pageActions = (initial as { contents?: { liveChatRenderer?: { actions?: unknown[] } } })?.contents?.liveChatRenderer?.actions ?? []
+  const s: Session = { key, clientVersion, continuation, videoId, updatedAt: Date.now(), pending: messagesFromActions(pageActions).slice(-30) }
+  sessions.set(channel, s)
+  return s
+}
+
+function renderRuns(runs: unknown): string {
+  if (!Array.isArray(runs)) return ''
+  let out = ''
+  for (const run of runs as Array<Record<string, unknown>>) {
+    if (typeof run.text === 'string') out += twemojify(escapeHtml(run.text))
+    else if (run.emoji) {
+      const emoji = run.emoji as { image?: { thumbnails?: { url: string }[] }; isCustomEmoji?: boolean; shortcuts?: string[] }
+      const url = emoji.image?.thumbnails?.slice(-1)[0]?.url
+      const alt = escapeHtml(emoji.shortcuts?.[0] || '')
+      if (emoji.isCustomEmoji && url) out += `<img class="kc-emote" src="${url}" alt="${alt}" title="${alt}" />`
+      else if (url) out += `<img class="kc-twemoji" src="${url}" alt="${alt}" />`
+    }
+  }
+  return out
+}
+
+function ytColor(badges: string[]): string {
+  if (badges.includes('broadcaster')) return '#ffd93d'
+  if (badges.includes('moderator')) return '#5f84f1'
+  return '#cfcfcf'
+}
+
+function parseActions(json: unknown): { messages: OutMsg[]; continuation: string | null; timeoutMs: number } {
+  const root = (json as { continuationContents?: { liveChatContinuation?: Record<string, unknown> } })?.continuationContents?.liveChatContinuation
+  const messages = messagesFromActions((root?.actions as unknown[]) ?? [])
+  const conts = (root?.continuations as unknown[]) ?? []
+  let continuation: string | null = null
+  let timeoutMs = 2500
+  for (const c of conts) {
+    const cd = (c as Record<string, { continuation?: string; timeoutMs?: number }>)
+    const inner = cd.invalidationContinuationData || cd.timedContinuationData || cd.reloadContinuationData
+    if (inner?.continuation) { continuation = inner.continuation; if (inner.timeoutMs) timeoutMs = inner.timeoutMs; break }
+  }
+  return { messages, continuation, timeoutMs }
+}
+
+export async function GET(req: NextRequest) {
+  const channel = req.nextUrl.searchParams.get('channel')?.trim()
+  if (!channel) return NextResponse.json({ error: 'channel required' }, { status: 400 })
+
+  let s = sessions.get(channel)
+  if (!s) {
+    const boot = await bootstrap(channel)
+    if (!boot) return NextResponse.json({ live: false, error: 'fetch_failed' })
+    if ('notLive' in boot) return NextResponse.json({ live: false })
+    s = boot
+  }
+
+  // Flush the initial snapshot captured at bootstrap before delta-polling.
+  if (s.pending.length) {
+    const messages = s.pending
+    s.pending = []
+    return NextResponse.json({ live: true, messages, pollMs: 2000 })
+  }
+
+  try {
+    const r = await fetch(`https://www.youtube.com/youtubei/v1/live_chat/get_live_chat?key=${s.key}&prettyPrint=false`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'User-Agent': UA },
+      body: JSON.stringify({ context: { client: { clientName: 'WEB', clientVersion: s.clientVersion } }, continuation: s.continuation }),
+    })
+    if (!r.ok) { sessions.delete(channel); return NextResponse.json({ live: false, error: `poll_${r.status}` }) }
+    const json = await r.json()
+    const { messages, continuation, timeoutMs } = parseActions(json)
+    if (continuation) { s.continuation = continuation; s.updatedAt = Date.now() }
+    else sessions.delete(channel) // stream likely ended; re-bootstrap next call
+    return NextResponse.json({ live: true, messages, pollMs: Math.max(1200, Math.min(5000, timeoutMs)) })
+  } catch (e) {
+    sessions.delete(channel)
+    return NextResponse.json({ live: false, error: e instanceof Error ? e.message : 'poll_error' })
+  }
+}
