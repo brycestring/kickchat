@@ -210,6 +210,19 @@ export async function GET(req: NextRequest) {
   if (req.nextUrl.searchParams.get('debug') === '1' && channel) {
     const html = await fetchText(channelLiveUrl(channel))
     const videoId = html?.match(/"videoId":"([\w-]{11})"/)?.[1] ?? null
+    let api: unknown = 'skipped'
+    if (key && videoId) {
+      try {
+        const r = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=liveStreamingDetails&id=${videoId}&key=${key}`)
+        const body = await r.json().catch(() => null) as { items?: { liveStreamingDetails?: { activeLiveChatId?: string } }[]; error?: { message?: string; errors?: { reason?: string }[] } } | null
+        api = {
+          status: r.status,
+          activeLiveChatId: body?.items?.[0]?.liveStreamingDetails?.activeLiveChatId ?? null,
+          errorReason: body?.error?.errors?.[0]?.reason ?? null,
+          errorMessage: body?.error?.message?.slice(0, 200) ?? null,
+        }
+      } catch (e) { api = { fetchError: e instanceof Error ? e.message : 'err' } }
+    }
     return NextResponse.json({
       hasKey: !!key,
       fetched: html !== null,
@@ -217,7 +230,7 @@ export async function GET(req: NextRequest) {
       videoId,
       isLive: html ? /"isLive":true/.test(html) : false,
       consent: html ? /consent\.youtube\.com|Before you continue/i.test(html) : false,
-      title: html?.match(/<title>([^<]{0,80})/)?.[1] ?? null,
+      api,
     })
   }
 
