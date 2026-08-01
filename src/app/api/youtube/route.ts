@@ -49,13 +49,24 @@ function messagesFromActions(actions: unknown[]): OutMsg[] {
 
 function channelLiveUrl(channel: string): string {
   const c = channel.trim().replace(/^@/, '')
-  if (/^UC[A-Za-z0-9_-]{20,}$/.test(c)) return `https://www.youtube.com/channel/${c}/live`
-  return `https://www.youtube.com/@${encodeURIComponent(c)}/live`
+  if (/^UC[A-Za-z0-9_-]{20,}$/.test(c)) return `https://www.youtube.com/channel/${c}/live?hl=en&gl=US`
+  return `https://www.youtube.com/@${encodeURIComponent(c)}/live?hl=en&gl=US`
 }
 
 async function fetchText(url: string): Promise<string | null> {
   try {
-    const r = await fetch(url, { headers: { 'User-Agent': UA, 'Accept-Language': 'en-US,en;q=0.9' } })
+    // The consent cookie + forced US/English locale make YouTube serve the real
+    // page instead of a consent/cookie wall. Datacenter IPs (e.g. Railway) get
+    // that wall by default, which strips ytInitialData and the videoId — so
+    // without this the /live scrape silently yields no live video. (Same trick
+    // yt-dlp uses.)
+    const r = await fetch(url, {
+      headers: {
+        'User-Agent': UA,
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Cookie': 'SOCS=CAI; CONSENT=YES+cb',
+      },
+    })
     if (!r.ok) return null
     return await r.text()
   } catch { return null }
@@ -107,7 +118,7 @@ async function resolveVideoId(channel: string): Promise<string | null> {
 }
 
 async function bootstrapScrape(channel: string, videoId: string): Promise<ScrapeSession | { notLive: true }> {
-  const chatHtml = await fetchText(`https://www.youtube.com/live_chat?is_popout=1&v=${videoId}`)
+  const chatHtml = await fetchText(`https://www.youtube.com/live_chat?is_popout=1&hl=en&gl=US&v=${videoId}`)
   if (!chatHtml) return { notLive: true }
   const key = chatHtml.match(/"INNERTUBE_API_KEY":"([^"]+)"/)?.[1]
   const clientVersion = chatHtml.match(/"INNERTUBE_CONTEXT_CLIENT_VERSION":"([^"]+)"/)?.[1]
