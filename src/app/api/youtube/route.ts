@@ -223,8 +223,8 @@ export async function GET(req: NextRequest) {
           u.searchParams.set('liveChatId', liveChatId)
           u.searchParams.set('key', key)
           const mr = await fetch(u)
-          const mb = await mr.json().catch(() => null) as { items?: unknown[]; error?: { message?: string; errors?: { reason?: string }[] } } | null
-          msgs = { status: mr.status, count: mb?.items?.length ?? 0, errorReason: mb?.error?.errors?.[0]?.reason ?? null, errorMessage: mb?.error?.message?.slice(0, 200) ?? null }
+          const raw = await mr.text()
+          msgs = { status: mr.status, raw: raw.slice(0, 400) }
         }
         api = {
           status: r.status,
