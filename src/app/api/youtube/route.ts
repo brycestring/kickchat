@@ -192,7 +192,10 @@ export async function GET(req: NextRequest) {
     const { messages, continuation, timeoutMs } = parseActions(json)
     if (continuation) { s.continuation = continuation; s.updatedAt = Date.now() }
     else sessions.delete(channel)
-    return NextResponse.json({ live: true, messages, pollMs: Math.max(1200, Math.min(5000, timeoutMs)) })
+    // Respect YouTube's timeoutMs. This continuation is a long-poll (typically
+    // ~10s); polling faster just resets it and perpetually returns 0 messages,
+    // so we must NOT cap below the server's suggested interval.
+    return NextResponse.json({ live: true, messages, pollMs: Math.max(2000, Math.min(10000, timeoutMs)) })
   } catch (e) {
     sessions.delete(channel)
     return NextResponse.json({ live: false, error: e instanceof Error ? e.message : 'poll_error' })
