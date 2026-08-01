@@ -205,6 +205,22 @@ export async function GET(req: NextRequest) {
   if (!channel) return NextResponse.json({ error: 'channel required' }, { status: 400 })
   const key = apiKey()
 
+  // Temporary diagnostics: ?debug=1 reports what the /live scrape actually sees
+  // from this host, so we can tell a datacenter block apart from a real bug.
+  if (req.nextUrl.searchParams.get('debug') === '1' && channel) {
+    const html = await fetchText(channelLiveUrl(channel))
+    const videoId = html?.match(/"videoId":"([\w-]{11})"/)?.[1] ?? null
+    return NextResponse.json({
+      hasKey: !!key,
+      fetched: html !== null,
+      bytes: html?.length ?? 0,
+      videoId,
+      isLive: html ? /"isLive":true/.test(html) : false,
+      consent: html ? /consent\.youtube\.com|Before you continue/i.test(html) : false,
+      title: html?.match(/<title>([^<]{0,80})/)?.[1] ?? null,
+    })
+  }
+
   let s = sessions.get(channel)
   if (!s) {
     const videoId = await resolveVideoId(channel)
