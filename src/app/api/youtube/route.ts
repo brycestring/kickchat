@@ -215,11 +215,23 @@ export async function GET(req: NextRequest) {
       try {
         const r = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=liveStreamingDetails&id=${videoId}&key=${key}`)
         const body = await r.json().catch(() => null) as { items?: { liveStreamingDetails?: { activeLiveChatId?: string } }[]; error?: { message?: string; errors?: { reason?: string }[] } } | null
+        const liveChatId = body?.items?.[0]?.liveStreamingDetails?.activeLiveChatId ?? null
+        let msgs: unknown = 'skipped'
+        if (liveChatId) {
+          const u = new URL('https://www.googleapis.com/youtube/v3/liveChatMessages')
+          u.searchParams.set('part', 'snippet,authorDetails')
+          u.searchParams.set('liveChatId', liveChatId)
+          u.searchParams.set('key', key)
+          const mr = await fetch(u)
+          const mb = await mr.json().catch(() => null) as { items?: unknown[]; error?: { message?: string; errors?: { reason?: string }[] } } | null
+          msgs = { status: mr.status, count: mb?.items?.length ?? 0, errorReason: mb?.error?.errors?.[0]?.reason ?? null, errorMessage: mb?.error?.message?.slice(0, 200) ?? null }
+        }
         api = {
           status: r.status,
-          activeLiveChatId: body?.items?.[0]?.liveStreamingDetails?.activeLiveChatId ?? null,
+          activeLiveChatId: liveChatId,
           errorReason: body?.error?.errors?.[0]?.reason ?? null,
           errorMessage: body?.error?.message?.slice(0, 200) ?? null,
+          liveChatMessages: msgs,
         }
       } catch (e) { api = { fetchError: e instanceof Error ? e.message : 'err' } }
     }
