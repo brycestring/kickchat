@@ -232,6 +232,23 @@ export async function GET(req: NextRequest) {
         }
       } catch (e) { api = { fetchError: e instanceof Error ? e.message : 'err' } }
     }
+    // Also probe the youtubei get_live_chat scrape path end-to-end.
+    let scrape: unknown = 'skipped'
+    if (videoId) {
+      const boot = await bootstrapScrape(channel, videoId)
+      if ('notLive' in boot) scrape = { bootstrap: 'failed' }
+      else {
+        const pr = await fetch(`https://www.youtube.com/youtubei/v1/live_chat/get_live_chat?key=${boot.key}&prettyPrint=false`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'User-Agent': UA, 'Cookie': 'SOCS=CAI; CONSENT=YES+cb' },
+          body: JSON.stringify({ context: { client: { clientName: 'WEB', clientVersion: boot.clientVersion } }, continuation: boot.continuation }),
+        })
+        const raw = await pr.text()
+        let parsed = 0
+        try { parsed = parseActions(JSON.parse(raw)).messages.length } catch {}
+        scrape = { bootstrap: 'ok', seeded: boot.pending.length, pollStatus: pr.status, polledMsgs: parsed, rawLen: raw.length }
+      }
+    }
     return NextResponse.json({
       hasKey: !!key,
       fetched: html !== null,
@@ -240,6 +257,7 @@ export async function GET(req: NextRequest) {
       isLive: html ? /"isLive":true/.test(html) : false,
       consent: html ? /consent\.youtube\.com|Before you continue/i.test(html) : false,
       api,
+      scrape,
     })
   }
 
