@@ -218,13 +218,10 @@ export async function GET(req: NextRequest) {
         const liveChatId = body?.items?.[0]?.liveStreamingDetails?.activeLiveChatId ?? null
         let msgs: unknown = 'skipped'
         if (liveChatId) {
-          const u = new URL('https://www.googleapis.com/youtube/v3/liveChatMessages')
-          u.searchParams.set('part', 'snippet,authorDetails')
-          u.searchParams.set('liveChatId', liveChatId)
-          u.searchParams.set('key', key)
-          const mr = await fetch(u)
+          const strUrl = `https://www.googleapis.com/youtube/v3/liveChatMessages?part=snippet,authorDetails&liveChatId=${encodeURIComponent(liveChatId)}&key=${key}`
+          const mr = await fetch(strUrl)
           const raw = await mr.text()
-          msgs = { status: mr.status, raw: raw.slice(0, 400) }
+          msgs = { status: mr.status, finalUrl: mr.url.replace(key, 'KEY'), raw: raw.slice(0, 500) }
         }
         api = {
           status: r.status,
