@@ -26,14 +26,23 @@ const sessions = new Map<string, Session>()
 
 // Parse a YouTube live-chat action array (same item shape whether it comes
 // from the page's initial ytInitialData or a get_live_chat poll response).
+// Handles plain text AND paid/member events (super chats, super stickers,
+// memberships, gifted-membership announcements) so those aren't silently
+// dropped from the overlay.
 function messagesFromActions(actions: unknown[]): OutMsg[] {
   const messages: OutMsg[] = []
   for (const a of actions) {
     const item = (a as { addChatItemAction?: { item?: Record<string, unknown> } })?.addChatItemAction?.item
-    const r = item?.liveChatTextMessageRenderer as Record<string, unknown> | undefined
+    if (!item) continue
+    const r = (item.liveChatTextMessageRenderer
+      || item.liveChatPaidMessageRenderer
+      || item.liveChatPaidStickerRenderer
+      || item.liveChatMembershipItemRenderer
+      || item.liveChatSponsorshipsGiftPurchaseAnnouncementRenderer) as Record<string, unknown> | undefined
     if (!r) continue
     const id = String(r.id ?? '')
     const username = ((r.authorName as { simpleText?: string })?.simpleText) ?? ''
+    if (!id || !username) continue
     const badges: string[] = []
     for (const b of (r.authorBadges as unknown[]) ?? []) {
       const bd = ((b as { liveChatAuthorBadgeRenderer?: { tooltip?: string; icon?: { iconType?: string } } })?.liveChatAuthorBadgeRenderer)
@@ -45,7 +54,18 @@ function messagesFromActions(actions: unknown[]): OutMsg[] {
       if (src && !badges.includes(src)) badges.push(src)
     }
     const roleKeys = badges.map(s => s.includes('broadcaster') ? 'broadcaster' : s.includes('moderator') ? 'moderator' : '')
-    if (id && username) messages.push({ id, username, color: ytColor(roleKeys), parts: runsToParts((r.message as { runs?: unknown })?.runs), badges })
+    // Build the message body. Plain messages use `message.runs`; membership /
+    // gift announcements carry their text in header fields; super chats/stickers
+    // may have no comment, so we fall back to the purchase amount.
+    let parts = runsToParts((r.message as { runs?: unknown })?.runs)
+    if (!parts.length) {
+      const header = (r.headerPrimaryText as { runs?: unknown })?.runs ?? (r.headerSubtext as { runs?: unknown })?.runs
+      parts = runsToParts(header)
+    }
+    const amount = ((r.purchaseAmountText as { simpleText?: string })?.simpleText) ?? ''
+    if (amount) parts = [{ t: 'text', v: parts.length ? `${amount}: ` : amount }, ...parts]
+    if (!parts.length) continue
+    messages.push({ id, username, color: ytColor(roleKeys), parts, badges })
   }
   return messages
 }
