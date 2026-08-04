@@ -103,21 +103,53 @@ function deepFindContinuation(obj: unknown): string | null {
   return found
 }
 
-// Resolve the channel's current live video id by scraping its /live page.
+// Resolve the channel's current live video id.
 // Returns null on fetch failure, '' when the channel isn't live, else the id.
+//
+// Datacenter IPs (Railway) get a DEGRADED /live page — no valid canonical and a
+// first "videoId" that points at some recommended/other stream, which is how we
+// ended up showing someone else's chat. So when a Data API key is available we
+// resolve via the API (reliable everywhere); only without a key do we scrape.
 async function resolveVideoId(channel: string): Promise<string | null> {
+  const key = process.env.YOUTUBE_API_KEY || ''
+  if (key) {
+    const viaApi = await resolveVideoIdApi(channel, key)
+    if (viaApi !== null) return viaApi // '' (not live) or an id — trust the API
+    // API failed hard (network/quota) — fall through to the scrape as a backup.
+  }
   const liveHtml = await fetchText(channelLiveUrl(channel))
   if (!liveHtml) return null
-  // Prefer the page's canonical watch URL: on a /live page this is the channel's
-  // OWN live video. The first raw "videoId" match is unreliable — it can be a
-  // recommended/other live stream elsewhere on the page, which is how we ended
-  // up showing someone else's chat. When the channel isn't live, canonical is a
-  // channel/@handle URL (no video id) → treat as not-live.
   const canonical = liveHtml.match(/<link rel="canonical" href="https:\/\/www\.youtube\.com\/watch\?v=([\w-]{11})"/)?.[1]
   if (canonical) return canonical
   if (/<link rel="canonical" href="https:\/\/www\.youtube\.com\/(?:channel|@)/.test(liveHtml)) return ''
-  // No usable canonical (rare) — fall back to the first embedded id.
   return liveHtml.match(/"videoId":"([\w-]{11})"/)?.[1] ?? ''
+}
+
+// handle → channelId cache (a handle's channel id never changes) to avoid
+// spending an extra API unit on every session bootstrap.
+const channelIdCache = new Map<string, string>()
+
+// Resolve the current live video id via the Data API. Returns an id, '' when the
+// channel isn't live, or null on a hard failure (so the caller can fall back).
+async function resolveVideoIdApi(channel: string, key: string): Promise<string | null> {
+  try {
+    const c = channel.trim().replace(/^@/, '')
+    let channelId = /^UC[A-Za-z0-9_-]{20,}$/.test(c) ? c : channelIdCache.get(c) || ''
+    if (!channelId) {
+      const cr = await fetch(`https://www.googleapis.com/youtube/v3/channels?part=id&forHandle=${encodeURIComponent(c)}&key=${key}`)
+      if (!cr.ok) return null
+      const cj = await cr.json()
+      channelId = cj?.items?.[0]?.id ?? ''
+      if (!channelId) return '' // unknown handle → treat as not live
+      channelIdCache.set(c, channelId)
+    }
+    // search.list eventType=live returns the channel's current live video (100
+    // quota units — only run on session bootstrap, not per poll).
+    const sr = await fetch(`https://www.googleapis.com/youtube/v3/search?part=id&channelId=${channelId}&eventType=live&type=video&key=${key}`)
+    if (!sr.ok) return null
+    const sj = await sr.json()
+    return sj?.items?.[0]?.id?.videoId ?? '' // no live item → not live
+  } catch { return null }
 }
 
 async function bootstrapScrape(videoId: string): Promise<Session | { notLive: true }> {
@@ -197,7 +229,7 @@ export async function GET(req: NextRequest) {
         }
       } catch (e) { apiErr = e instanceof Error ? e.message : 'err' }
     }
-    return NextResponse.json({ build: 'apiresolve-v3', hasKey: !!key, scrapeResolved, channelId, apiVideoId, apiErr })
+    return NextResponse.json({ build: 'apiresolve-v4', hasKey: !!key, resolved: scrapeResolved, channelId, apiVideoId, apiErr })
   }
 
   // Force re-resolution / clear a stale session with ?reset=1.
