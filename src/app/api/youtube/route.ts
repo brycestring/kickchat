@@ -104,10 +104,20 @@ function deepFindContinuation(obj: unknown): string | null {
 }
 
 // Resolve the channel's current live video id by scraping its /live page.
+// Returns null on fetch failure, '' when the channel isn't live, else the id.
 async function resolveVideoId(channel: string): Promise<string | null> {
   const liveHtml = await fetchText(channelLiveUrl(channel))
   if (!liveHtml) return null
-  return liveHtml.match(/"videoId":"([\w-]{11})"/)?.[1] ?? null
+  // Prefer the page's canonical watch URL: on a /live page this is the channel's
+  // OWN live video. The first raw "videoId" match is unreliable — it can be a
+  // recommended/other live stream elsewhere on the page, which is how we ended
+  // up showing someone else's chat. When the channel isn't live, canonical is a
+  // channel/@handle URL (no video id) → treat as not-live.
+  const canonical = liveHtml.match(/<link rel="canonical" href="https:\/\/www\.youtube\.com\/watch\?v=([\w-]{11})"/)?.[1]
+  if (canonical) return canonical
+  if (/<link rel="canonical" href="https:\/\/www\.youtube\.com\/(?:channel|@)/.test(liveHtml)) return ''
+  // No usable canonical (rare) — fall back to the first embedded id.
+  return liveHtml.match(/"videoId":"([\w-]{11})"/)?.[1] ?? ''
 }
 
 async function bootstrapScrape(videoId: string): Promise<Session | { notLive: true }> {
