@@ -174,6 +174,20 @@ export async function GET(req: NextRequest) {
   const channel = req.nextUrl.searchParams.get('channel')?.trim()
   if (!channel) return NextResponse.json({ error: 'channel required' }, { status: 400 })
 
+  // Temporary diagnostics: show which build is running + what videoId resolves.
+  if (req.nextUrl.searchParams.get('debug') === '1' && channel) {
+    const liveHtml = await fetchText(channelLiveUrl(channel))
+    const canonical = liveHtml?.match(/<link rel="canonical" href="https:\/\/www\.youtube\.com\/watch\?v=([\w-]{11})"/)?.[1] ?? null
+    const canonicalRaw = liveHtml?.match(/<link rel="canonical" href="([^"]*)"/)?.[1] ?? null
+    const firstRaw = liveHtml?.match(/"videoId":"([\w-]{11})"/)?.[1] ?? null
+    const resolved = await resolveVideoId(channel)
+    const sess = sessions.get(channel)
+    return NextResponse.json({ build: 'canonical-v2', resolved, canonical, canonicalRaw, firstRaw, sessionVideoId: sess?.videoId ?? null })
+  }
+
+  // Force re-resolution / clear a stale session with ?reset=1.
+  if (req.nextUrl.searchParams.get('reset') === '1') { sessions.delete(channel) }
+
   let s = sessions.get(channel)
   if (!s) {
     const videoId = await resolveVideoId(channel)
