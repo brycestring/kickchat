@@ -206,32 +206,6 @@ export async function GET(req: NextRequest) {
   const channel = req.nextUrl.searchParams.get('channel')?.trim()
   if (!channel) return NextResponse.json({ error: 'channel required' }, { status: 400 })
 
-  // Temporary diagnostics: compare scrape resolution vs Data API resolution.
-  if (req.nextUrl.searchParams.get('debug') === '1' && channel) {
-    const scrapeResolved = await resolveVideoId(channel)
-    const key = process.env.YOUTUBE_API_KEY || ''
-    let channelId: string | null = null, apiVideoId: string | null = null, apiErr: string | null = null
-    if (key) {
-      try {
-        const c = channel.replace(/^@/, '')
-        if (/^UC[A-Za-z0-9_-]{20,}$/.test(c)) channelId = c
-        else {
-          const cr = await fetch(`https://www.googleapis.com/youtube/v3/channels?part=id&forHandle=${encodeURIComponent(c)}&key=${key}`)
-          const cj = await cr.json().catch(() => null)
-          channelId = cj?.items?.[0]?.id ?? null
-          if (!channelId) apiErr = `channels_${cr.status}:${cj?.error?.errors?.[0]?.reason ?? ''}`
-        }
-        if (channelId) {
-          const sr = await fetch(`https://www.googleapis.com/youtube/v3/search?part=id&channelId=${channelId}&eventType=live&type=video&key=${key}`)
-          const sj = await sr.json().catch(() => null)
-          apiVideoId = sj?.items?.[0]?.id?.videoId ?? null
-          if (!apiVideoId && !apiErr) apiErr = `search_${sr.status}:${sj?.error?.errors?.[0]?.reason ?? ''}`
-        }
-      } catch (e) { apiErr = e instanceof Error ? e.message : 'err' }
-    }
-    return NextResponse.json({ build: 'apiresolve-v4', hasKey: !!key, resolved: scrapeResolved, channelId, apiVideoId, apiErr })
-  }
-
   // Force re-resolution / clear a stale session with ?reset=1.
   if (req.nextUrl.searchParams.get('reset') === '1') { sessions.delete(channel) }
 
