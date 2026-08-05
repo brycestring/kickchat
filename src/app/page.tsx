@@ -183,9 +183,7 @@ export default function SettingsPage() {
 
       <header className="hero">
         <div className="hero-inner">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/kick-wordmark.png" alt="Kick" className="hero-wordmark" />
-          <h1 className="title">Chat Box</h1>
+          <h1 className="title glow-text">Stream Chat Box</h1>
         </div>
       </header>
 
@@ -312,10 +310,10 @@ export default function SettingsPage() {
       <footer className="footer">
         <p className="footer-credit">
           <span className="muted">Made for</span>
-          <span className="footer-link"> Kick streamers</span>
+          <span className="footer-link"> streamers</span>
         </p>
         <p className="footer-disclaimer">
-          Not affiliated with <a href="https://kick.com" target="_blank" rel="noreferrer noopener">Kick.com</a>
+          Works with Kick, Twitch &amp; YouTube
         </p>
       </footer>
     </div>
@@ -334,7 +332,7 @@ interface SampleMsg {
 
 // A realistic mix — all three platforms chatting at once.
 const SAMPLES: SampleMsg[] = [
-  { platform: 'kick', badges: ['broadcaster'], username: 'streamer', color: '#53fc18', text: 'welcome to the stream 🎮' },
+  { platform: 'kick', badges: ['broadcaster'], username: 'streamer', color: '#ffffff', text: 'welcome to the stream 🎮' },
   { platform: 'twitch', badges: ['moderator'], username: 'Mod_Alex', color: '#00c8af', text: 'rules are in the panels below!' },
   { platform: 'youtube', badges: [], username: 'YT_Viewer', color: '#cfcfcf', text: 'first time catching you live 🔥' },
   { platform: 'kick', badges: ['vip'], username: 'KickFan', color: '#ff66c4', text: 'LETSGO', emote: { id: '37226', name: 'KEKW' } },
@@ -455,34 +453,11 @@ function Check({ label, checked, onChange }: { label: string; checked: boolean; 
   )
 }
 
-function KickLogo() {
-  // Kick's pixel-K mark: chunky blocks forming a stylized K.
-  return (
-    <svg width="64" height="64" viewBox="0 0 100 100" aria-label="Kick logo" className="kick-logo">
-      <rect width="100" height="100" rx="18" fill="#53fc18"/>
-      <g fill="#0a0a0a">
-        {/* Spine */}
-        <rect x="18" y="22" width="16" height="56"/>
-        {/* Center connector (joins spine to diagonal) */}
-        <rect x="34" y="42" width="16" height="16"/>
-        {/* Upper inner step */}
-        <rect x="50" y="30" width="16" height="14"/>
-        {/* Upper outer tip */}
-        <rect x="66" y="22" width="16" height="14"/>
-        {/* Lower inner step */}
-        <rect x="50" y="56" width="16" height="14"/>
-        {/* Lower outer tip */}
-        <rect x="66" y="64" width="16" height="14"/>
-      </g>
-    </svg>
-  )
-}
-
 const styles = `
 :root {
-  --primary: #53fc18;
-  --primary-dim: #45d414;
-  --primary-glow: rgba(83, 252, 24, 0.35);
+  --primary: #ffffff;
+  --primary-dim: #cfcfcf;
+  --primary-glow: rgba(255, 255, 255, 0.35);
   --bg-base: #121212;
   --bg-surface: #1e1e1e;
   --bg-elevated: #2a2a2a;
@@ -529,7 +504,7 @@ html, body { margin: 0; padding: 0; background: var(--bg-base); color: var(--tex
   background: var(--bg-surface);
   border: 2px solid var(--border-color);
   border-radius: var(--radius);
-  box-shadow: 0 0 20px rgba(83,252,24,0.06), inset 0 0 60px rgba(0,0,0,0.5);
+  box-shadow: 0 0 20px rgba(255,255,255,0.06), inset 0 0 60px rgba(0,0,0,0.5);
   position: relative;
   overflow: hidden;
 }
@@ -584,14 +559,14 @@ html, body { margin: 0; padding: 0; background: var(--bg-base); color: var(--tex
 .input.small { padding: 8px 12px; font-size: 13px; width: 120px; text-align: center; }
 .input:focus, .select:focus {
   border-color: var(--primary);
-  box-shadow: 0 0 0 1px var(--primary), 0 0 20px rgba(83,252,24,0.2);
+  box-shadow: 0 0 0 1px var(--primary), 0 0 20px rgba(255,255,255,0.2);
 }
 .input:disabled { opacity: 0.4; cursor: not-allowed; }
 .input::placeholder { color: var(--text-muted); }
 .select {
   appearance: none;
   cursor: pointer;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2353fc18' d='M2 4l4 4 4-4'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23ffffff' d='M2 4l4 4 4-4'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 14px center;
   padding-right: 36px;
@@ -625,7 +600,7 @@ html, body { margin: 0; padding: 0; background: var(--bg-base); color: var(--tex
   box-shadow: 0 0 10px var(--primary-glow);
   opacity: 0; transition: opacity 0.15s ease;
 }
-.check input:checked ~ .check-mark { border-color: var(--primary); box-shadow: 0 0 10px rgba(83,252,24,0.25); }
+.check input:checked ~ .check-mark { border-color: var(--primary); box-shadow: 0 0 10px rgba(255,255,255,0.25); }
 .check input:checked ~ .check-mark::after { opacity: 1; }
 .check:hover .check-mark { border-color: var(--primary); }
 .check-label { font-size: 13px; color: var(--text-dim); letter-spacing: 0.02em; transition: color 0.15s ease; }
@@ -677,7 +652,7 @@ html, body { margin: 0; padding: 0; background: var(--bg-base); color: var(--tex
   word-break: break-all;
   cursor: pointer;
   position: relative;
-  text-shadow: 0 0 5px rgba(83,252,24,0.4);
+  text-shadow: 0 0 5px rgba(255,255,255,0.4);
   transition: all 0.2s ease;
 }
 .url-box::before {
@@ -687,7 +662,7 @@ html, body { margin: 0; padding: 0; background: var(--bg-base); color: var(--tex
   animation: blink 1s step-end infinite;
 }
 @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
-.url-box:hover { background: rgba(83,252,24,0.08); box-shadow: 0 0 20px rgba(83,252,24,0.2); }
+.url-box:hover { background: rgba(255,255,255,0.08); box-shadow: 0 0 20px rgba(255,255,255,0.2); }
 
 /* ---- Messages / errors ---- */
 .error { color: #ff6b6b; font-size: 13px; text-align: center; }
@@ -699,7 +674,7 @@ html, body { margin: 0; padding: 0; background: var(--bg-base); color: var(--tex
   position: relative;
   height: 340px;
   background:
-    linear-gradient(135deg, rgba(83,252,24,0.04), transparent 50%),
+    linear-gradient(135deg, rgba(255,255,255,0.04), transparent 50%),
     repeating-conic-gradient(#171717 0% 25%, #1d1d1d 0% 50%) 50% / 18px 18px;
   border: 1px solid var(--border-dim);
   border-radius: var(--radius);
@@ -707,10 +682,10 @@ html, body { margin: 0; padding: 0; background: var(--bg-base); color: var(--tex
   overflow-x: hidden;
   padding: 14px 16px;
   scrollbar-width: thin;
-  scrollbar-color: rgba(83,252,24,0.25) transparent;
+  scrollbar-color: rgba(255,255,255,0.25) transparent;
 }
 .preview::-webkit-scrollbar { width: 4px; }
-.preview::-webkit-scrollbar-thumb { background: rgba(83,252,24,0.25); border-radius: 2px; }
+.preview::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.25); border-radius: 2px; }
 .preview-chat {
   font-family: var(--font-open-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
   color: #ffffff;
@@ -746,7 +721,7 @@ html, body { margin: 0; padding: 0; background: var(--bg-base); color: var(--tex
 .footer {
   position: fixed; bottom: 0; left: 0; right: 0;
   background: linear-gradient(180deg, transparent 0%, rgba(0,0,0,0.85) 60%);
-  border-top: 1px solid rgba(83,252,24,0.2);
+  border-top: 1px solid rgba(255,255,255,0.2);
   padding: 14px 16px;
   text-align: center;
   z-index: 50;

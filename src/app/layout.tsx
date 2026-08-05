@@ -10,8 +10,8 @@ const openSans = Open_Sans({
 })
 
 export const metadata: Metadata = {
-  title: 'Kick Chat Box',
-  description: 'Embeddable Kick chat box for OBS browser source — like chatis, but for Kick.',
+  title: 'Stream Chat Box',
+  description: 'Embeddable multi-platform chat box for OBS browser source — Kick, Twitch & YouTube in one overlay.',
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
